@@ -1,0 +1,123 @@
+package migrations
+
+import (
+	"bbs-go/internal/models"
+	"bbs-go/internal/services"
+	"errors"
+	"log/slog"
+	"sync"
+
+	"github.com/mlogclub/simple/common/dates"
+	"github.com/mlogclub/simple/sqls"
+	"github.com/spf13/cast"
+)
+
+var migrationFuncs = make(map[int64]MigrationFunc)
+var versions = make([]int64, 0)
+var migrations = make(map[int64]models.Migration, 0)
+var mu sync.Mutex
+
+type MigrationFunc struct {
+	Version int64
+	Remark  string
+	Fn      func() error
+}
+
+func Migrate() error {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if list := services.MigrationService.Find(sqls.NewCnd().Asc("version")); len(list) > 0 {
+		for _, element := range list {
+			migrations[element.Version] = element
+		}
+	}
+
+	for _, version := range versions {
+		if err := runMigration(version); err != nil {
+			slog.Error("migrate failed", "version", version, "error", err)
+			return err
+		}
+	}
+	return nil
+}
+
+func register(version int64, remark string, fn func() error) {
+	if len(versions) == 0 || version > versions[len(versions)-1] {
+		versions = append(versions, version)
+		migrationFuncs[version] = MigrationFunc{
+			Version: version,
+			Remark:  remark,
+			Fn:      fn,
+		}
+	} else {
+		slog.Error("register migration failed, version is less than latest version", slog.Any("version", version))
+		panic(errors.New("register migration failed, version is less than latest version. version: " + cast.ToString(version)))
+	}
+}
+
+func runMigration(version int64) error {
+	migration, found := migrations[version]
+	if found && migration.Success {
+		return nil
+	}
+
+	f, ok := migrationFuncs[version]
+	if !ok {
+		return errors.New("migration function not found")
+	}
+
+	err := f.Fn()
+
+	if !found {
+		migration = models.Migration{
+			Version:    f.Version,
+			Remark:     f.Remark,
+			Success:    false,
+			RetryCount: 0,
+			CreateTime: dates.NowTimestamp(),
+			UpdateTime: dates.NowTimestamp(),
+		}
+	}
+	if err == nil {
+		migration.Success = true
+	} else {
+		migration.Success = false
+		migration.ErrorInfo = err.Error()
+	}
+	migration.RetryCount++
+	migration.UpdateTime = dates.NowTimestamp()
+	if found {
+		if e := services.MigrationService.Update(&migration); e != nil {
+			slog.Error("update migration failed", "version", version, "error", err)
+		}
+	} else {
+		if e := services.MigrationService.Create(&migration); e != nil {
+			slog.Error("create migration failed", "version", version, "error", err)
+		}
+	}
+
+	return err
+}
+
+func init() {
+	register(1, "init migration", migrate_init)
+	register(2, "init task data", migrate_init_task_data)
+	register(3, "add email_code biz_type", migrate_add_email_code_biz_type)
+	register(5, "migrate smtp config to sys config", migrate_smtp_config_to_sys_config)
+	register(6, "init topic qa fields", migrate_topic_qa_init)
+	register(7, "qa bounty config defaults", migrate_qa_bounty_config)
+	register(8, "notification types defaults", migrate_notification_types_defaults)
+	register(9, "attachment config defaults", migrate_attachment_config)
+	register(10, "category parent_id for hierarchy", migrate_category_parent_id)
+	register(11, "site content config defaults", migrate_site_content_config)
+	register(12, "drop legacy api permission tables", migrate_drop_legacy_api_tables)
+	register(13, "drop legacy menu tables", migrate_drop_legacy_menu_tables)
+	register(15, "remove comment admin permissions", migrate_remove_comment_admin_permissions)
+	register(16, "community query indexes and favorite uniqueness", migrate_community_query_indexes)
+	register(17, "article query indexes and expired token cleanup index", migrate_article_and_token_indexes)
+	register(18, "persist topic and article list summaries", migrate_content_summaries)
+	register(19, "follow pagination and feed fan-out indexes", migrate_follow_indexes)
+	register(20, "topic latest and qa hot-path indexes", migrate_hot_path_indexes)
+	register(21, "comment hot score and bounty ledger indexes", migrate_comment_hot_score)
+}

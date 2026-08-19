@@ -1,0 +1,55 @@
+package cache
+
+import (
+	"bbs-go/internal/pkg/locales"
+	"errors"
+	"time"
+
+	"github.com/goburrow/cache"
+	"github.com/mlogclub/simple/sqls"
+
+	"bbs-go/internal/repositories"
+)
+
+type articleTagCache struct {
+	cache cache.LoadingCache
+}
+
+var ArticleTagCache = newArticleTagCache()
+
+func newArticleTagCache() *articleTagCache {
+	return &articleTagCache{
+		cache: cache.NewLoadingCache(
+			func(key cache.Key) (value cache.Value, e error) {
+				articleTags := repositories.ArticleTagRepository.FindByArticleId(sqls.DB(), key2Int64(key))
+				if len(articleTags) > 0 {
+					var tagIds []int64
+					for _, articleTag := range articleTags {
+						tagIds = append(tagIds, articleTag.TagId)
+					}
+					value = tagIds
+				} else {
+					e = errors.New(locales.Get("article.no_tags"))
+				}
+				return
+			},
+			cache.WithMaximumSize(envInt("BBSGO_ARTICLE_TAG_CACHE_SIZE", 10000, 1000, 100000)),
+			cache.WithExpireAfterAccess(30*time.Minute),
+		),
+	}
+}
+
+func (c *articleTagCache) Get(articleId int64) []int64 {
+	val, err := c.cache.Get(articleId)
+	if err != nil {
+		return nil
+	}
+	if val != nil {
+		return val.([]int64)
+	}
+	return nil
+}
+
+func (c *articleTagCache) Invalidate(articleId int64) {
+	c.cache.Invalidate(articleId)
+}

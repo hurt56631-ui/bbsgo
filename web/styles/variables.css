@@ -1,0 +1,13 @@
+:root {
+  --body-background: linear-gradient(136deg, #edf0ff99, #e7f6fa99);
+  --topics-nav-color1: color-mix(in srgb, var(--sidebar-primary) 7%, var(--background));
+  --topics-nav-color3: color-mix(in srgb, var(--sidebar-primary) 11%, var(--background));
+  --topics-nav-active-foreground: var(--sidebar-primary);
+}
+
+.dark {
+  --body-background: linear-gradient(136deg, #181818, #121212);
+  --topics-nav-color1: color-mix(in srgb, var(--sidebar-primary) 18%, var(--background));
+  --topics-nav-color3: color-mix(in srgb, var(--sidebar-primary) 24%, var(--background));
+  --topics-nav-active-foreground: var(--sidebar-primary);
+}

@@ -1,0 +1,31 @@
+Port: 8082 # 端口
+AllowedOrigins:
+  - "*"
+Installed: false # 是否已完成安装
+
+# 数据下载 https://github.com/lionsoul2014/ip2region/tree/master/data
+IPLocator:
+  IPv4DataPath: # IPv4 数据文件（建议使用 ip2region_v4.xdb）
+  IPv6DataPath: # IPv6 数据文件（建议使用 ip2region_v6.xdb）
+
+# ID 编解码秘钥（安装时自动生成）
+IdCodec:
+  Key: 0
+
+# 日志配置
+Logger:
+  Filename: /data/logs/bbs-go.log   # 日志文件的位置
+  MaxSize: 100                      # 文件最大尺寸（以MB为单位）
+  MaxAge: 10                        # 保留旧文件的最大天数
+  MaxBackups: 10                    # 保留的最大旧文件数量
+
+# 数据库连接
+DB:
+  Url: username:password@tcp(localhost:3306)/bbsgo_db?charset=utf8mb4&parseTime=True&multiStatements=true&loc=Local
+  MaxIdleConns: 50
+  MaxOpenConns: 200
+  LogLevel: warn # SQL日志级别：silent、error、warn、info
+
+# search
+Search:
+  IndexPath: # 索引路径

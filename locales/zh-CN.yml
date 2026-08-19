@@ -1,0 +1,263 @@
+common:
+  not_found: "数据不存在"
+  unsupported: "不支持该操作"
+  invalid_request: "请求不合法"
+  user_id_required: "缺少 userId"
+  comment_id_required: "缺少 commentId"
+topic:
+  category:
+    latest: 最新
+    recommend: 推荐
+    follow: 关注
+    has_children: "该分类下存在子分类，请先删除子分类"
+    child_type_must_match_parent: "子分类类型必须与父分类一致"
+  under_review: "内容审核中"
+  no_permission: "无权限"
+  type_not_supported: "当前类型帖子不支持修改"
+  category_type_mismatch: "所选分类不支持当前内容类型"
+  title_required: "标题不能为空"
+  title_too_long: "标题长度不能超过128"
+  content_required: "内容不能为空"
+  category_required: "请选择分类"
+  category_not_found: "分类不存在"
+  topic_not_found: "话题不存在"
+  updates_disabled: "未开启动态功能"
+  discussions_disabled: "未开启帖子功能"
+  qa_disabled: "未开启提问功能"
+  shared_image: "分享图片"
+  bounty_invalid: "悬赏积分不能为负数"
+  insufficient_score: "积分不足，无法设置悬赏"
+  bounty_deduct: "问答悬赏"
+  bounty_reward: "问答被采纳悬赏"
+  bounty_refund: "问答悬赏退回"
+  qa_bounty_disabled: "未开启问答悬赏功能"
+  bounty_required: "当前要求问答帖必须设置悬赏积分"
+  bounty_out_of_range: "悬赏积分超出允许范围"
+  bounty_out_of_range_range: "悬赏积分需在 %d ~ %d 之间"
+  bounty_out_of_range_min: "悬赏积分不能低于 %d"
+  bounty_out_of_range_max: "悬赏积分不能高于 %d"
+  bounty_unaccept_forbidden: "悬赏已发放，不能取消采纳"
+  answer_already_accepted: "该问答已采纳答案"
+
+user:
+  anonymous: "匿名用户%d"
+  default_description: "这家伙很懒，什么都没留下"
+  forbidden_nickname: "禁言用户"
+  blacklist: "黑名单用户"
+  not_found: "用户不存在"
+  no_permission: "无权限"
+  forbidden_time_invalid: "禁言时间错误"
+  nickname_required: "昵称不能为空"
+  nickname_length_invalid: "昵称长度需在 %d 到 %d 个字符之间"
+  gender_error: "性别数据错误"
+  homepage_error: "个人主页地址错误"
+  avatar_empty: "头像不能为空"
+  upload_image_required: "请上传图片"
+  email_verified: "用户邮箱已验证"
+  email_required: "请输入邮箱"
+  email_invalid: "邮箱格式不正确"
+  email_occupied: "邮箱：%s 已被占用"
+  email_suffix_not_supported: "不支持该邮箱后缀: %s"
+  email_verify_title: "邮箱验证 - %s"
+  email_verify_content: "该邮件用于验证你在 %s 中设置邮箱的正确性，请在%d小时内完成验证。验证链接：%s"
+  email_verify_link: "点击这里验证邮箱>>"
+  email_verify_expired: "验证邮件已过期"
+  email_verify_illegal: "非法请求"
+  username_required: "请输入用户名"
+  username_invalid: "用户名必须由5-12位(数字、字母、_、-)组成，且必须以字母开头"
+  username_email_required: "用户名/邮箱不能为空"
+  username_occupied: "用户名：%s 已被占用"
+  username_already_set: "你已设置了用户名，无法重复设置。"
+  password_required: "请输入密码"
+  password_invalid: "密码过于简单"
+  password_too_long: "密码长度不能超过128"
+  password_mismatch: "两次输入密码不匹配"
+  password_login_failed: "用户名或密码错误"
+  url_invalid: "URL格式错误"
+  password_reset_title: "重置密码 - %s"
+  password_reset_content: "你正在 %s 进行密码重置，请在%d小时内完成操作。重置链接：%s"
+  password_reset_link: "点击这里重置密码>>"
+  password_reset_expired: "重置密码链接已过期"
+  password_reset_illegal: "非法的重置密码请求"
+  password_already_set: "你已设置了密码，如需修改请前往修改页面。"
+  password_not_set: "你没设置密码，请先设置密码"
+  old_password_invalid: "旧密码验证失败"
+
+errors:
+  not_login: "请先登录"
+  no_permission: "无权限"
+  captcha_error: "验证码错误"
+  forbidden: "已被禁言"
+  user_disabled: "账号已禁用"
+  user_not_found_or_disabled: "用户不存在或已被禁用"
+  email_not_verified: "请先验证邮箱"
+  in_observation: "账号尚在观察期，观察期剩余 %d 秒，请稍后再试"
+  too_fast: "发表太快了，请休息一会儿"
+
+auth:
+  password_login_disabled: "账号密码登录/注册已禁用"
+  phone_required: "请输入手机号码"
+  sms_login_disabled: "短信登录已禁用"
+  login_data_error: "登录数据错误"
+  weixin_login_disabled: "微信登录已禁用"
+  google_login_disabled: "Google登录未启用"
+  github_login_disabled: "GitHub登录未启用"
+  state_required: "state参数缺失"
+  bind_data_error: "绑定数据错误或已过期，请重新绑定"
+  invalid_bind_request: "无效的绑定请求"
+  credential_required: "credential参数缺失"
+  wechat_already_bound: "用户已绑定微信: %s"
+  wechat_bound_to_other: "微信已绑定到其他用户"
+  github_already_bound: "用户已绑定GitHub: %s"
+  github_bound_to_other: "GitHub账号已绑定到其他用户"
+  google_already_bound: "用户已绑定Google: %s"
+  google_bound_to_other: "Google账号已绑定到其他用户"
+  google_default_nickname: "Google用户"
+  github_default_nickname: "GitHub用户"
+  talkami_login_required: "请从 Talkami App 打开论坛"
+  managed_profile_edit_in_app: "头像、昵称和账号资料请在唐僧叨叨中修改"
+
+article:
+  not_found: "文章不存在"
+  no_tags: "文章没标签"
+  under_review: "文章审核中"
+  no_permission: "无权限"
+  disabled: "未开启文章功能"
+  title_required: "标题不能为空"
+  content_required: "内容不能为空"
+
+vote:
+  title_required: "投票标题不能为空"
+  title_too_long: "投票标题长度不能超过128"
+  option_min: "投票选项至少2个"
+  option_max: "投票选项最多20个"
+  option_required: "投票选项内容不能为空"
+  option_too_long: "投票选项内容长度不能超过256"
+  expired_at_future: "投票截止时间必须是未来时间"
+  multiple_num_required: "多选投票可选数量必须大于0"
+  multiple_num_too_large: "多选投票可选数量不能大于选项总数"
+  type_not_supported: "不支持的投票类型"
+  vote_id_required: "voteId不能为空"
+  select_option_required: "请选择投票选项"
+  option_invalid: "投票选项不合法"
+  not_found: "投票不存在"
+  expired: "投票已截止"
+  already_voted: "您已投票，不能重复提交"
+  option_not_found: "投票选项不存在"
+  single_only_one: "单选投票只能选择1项"
+  multiple_over_limit: "多选投票超过可选数量"
+
+comment:
+  invalid_params: "参数非法"
+  content_required: "请输入评论内容"
+  not_found: "评论不存在"
+
+favorite:
+  article_not_found: "收藏的文章不存在"
+  topic_not_found: "收藏的话题不存在"
+
+check_in:
+  already_checked_in: "你已签到"
+
+sms:
+  code_invalid: "验证码错误"
+
+settings:
+  invalid_format: "配置数据格式错误"
+
+admin:
+  user_id_required: "请传入：userId"
+  content_type_required: "请选择内容格式"
+  role_code_exists: "角色编码已存在"
+  system_role_edit_forbidden: "系统角色不允许编辑"
+  system_role_delete_forbidden: "系统角色不允许删除"
+  role_in_use_delete_forbidden: "已分配给用户的角色不允许删除"
+  delete_ids_required: "请选择要删除的记录"
+  entity_not_found: "数据不存在"
+  tag_name_exists: "标签「%s」已存在"
+  tag_name_required: "标签名称不能为空"
+  tag_empty: "标签为空"
+
+points:
+  insufficient: "积分不足"
+  must_be_positive: "分数必须为正数"
+  cannot_be_zero: "分数不能为0"
+
+xp:
+  cannot_be_zero: "经验不能为0"
+
+install:
+  already_installed: "系统已安装，无需重复安装"
+
+upload:
+  image_too_large: "图片不能超过 %d MB"
+  empty_image: "图片文件为空"
+  invalid_image_data: "图片数据无效"
+  unsupported_image_format: "不支持该图片格式"
+  invalid_image_dimensions: "图片尺寸无效"
+  image_dimensions_too_large: "图片尺寸过大"
+  image_format_mismatch: "图片格式与文件内容不一致"
+
+attachment:
+  not_found: "附件不存在或已下架"
+  insufficient_score: "积分不足，无法下载"
+  no_permission: "无权限操作该附件"
+  already_bound: "附件已绑定其他帖子"
+  ext_not_allowed: "不支持该文件类型"
+  file_missing: "文件不存在"
+  download_deduct: "附件下载"
+  disabled: "附件上传功能未开启"
+  too_large: "单个附件不能超过 %d MB"
+  too_many: "每篇帖子最多上传 %d 个附件"
+
+message:
+  system_nickname: "系统通知"
+  topic_recommend_msg_title: "你的话题被设为推荐"
+  topic_delete_msg_title: "你的话题被删除"
+  topic_favorite_msg_title: "收藏了你的话题"
+  topic_like_msg_title: "点赞了你的话题"
+  user_level_up_msg_title: "等级提升"
+  user_level_up_msg_content: "恭喜你升级到 Lv.%d"
+  user_badge_grant_msg_title: "获得新勋章"
+  user_badge_grant_msg_content: "恭喜你获得勋章：%s"
+  user_badge_default_name: "新勋章"
+  qa_answer_accepted_msg_title: "你的回答被采纳为最佳答案"
+  qa_answer_accepted_msg_title_with_bounty: "你的回答被采纳为最佳答案，获得 %d 积分"
+  comment_topic_reply_msg_title: "回复了你的话题"
+  comment_article_reply_msg_title: "回复了你的文章"
+  comment_reply_msg_title: "回复了你的评论"
+
+email:
+  new_message: "新消息提醒"
+  topic_comment: "收到话题评论"
+  comment_reply: "收到他人回复"
+  topic_like: "收到点赞"
+  topic_favorite: "话题被收藏"
+  topic_recommend: "话题被设为推荐"
+  topic_delete: "话题被删除"
+  article_comment: "收到文章评论"
+  user_level_up: "等级提升"
+  user_badge_grant: "获得新勋章"
+  qa_answer_accepted: "你的回答被采纳为最佳答案"
+  qa_answer_accepted_with_bounty: "你的回答被采纳为最佳答案，获得 %d 积分"
+  view_details: "点击查看详情"
+
+task:
+  group:
+    newbie: "新手任务"
+    daily: "每日任务"
+    achievement: "成就任务"
+
+talkami:
+  token_missing: "缺少论坛登录凭证"
+  auth_disabled: "唐僧统一登录尚未启用"
+  token_invalid: "论坛登录凭证无效或已过期"
+  token_used: "论坛登录凭证已使用，请重新获取"
+  user_disabled: "当前账号不可使用论坛"
+  user_mapping_conflict: "论坛用户映射冲突"
+
+like:
+  already_liked: "已经点赞"
+
+tag:
+  not_found: "标签不存在"

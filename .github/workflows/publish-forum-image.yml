@@ -1,0 +1,71 @@
+name: Build Forum Image
+
+on:
+  push:
+    branches:
+      - master
+      - talkami-main
+  workflow_dispatch:
+
+# Uploading files one by one creates many pushes. Keep only the newest build
+# for the same branch so old runs do not waste build minutes.
+concurrency:
+  group: forum-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  # Docker/GHCR repository names must be lowercase.
+  IMAGE_NAME: hurt6465-ai/bbsgo
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Use a shell command instead of hiding the compiler output inside the
+      # action summary. pipefail keeps the correct failed status while tee
+      # preserves the complete log as an artifact.
+      - name: Build and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${REGISTRY}/${IMAGE_NAME}"
+          docker buildx build \
+            --progress=plain \
+            --file ./Dockerfile \
+            --target app \
+            --platform linux/amd64 \
+            --push \
+            --tag "${image}:${GITHUB_REF_NAME}" \
+            --tag "${image}:latest" \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            . 2>&1 | tee docker-build.log
+
+      - name: Upload complete build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forum-docker-build-${{ github.run_id }}
+          path: docker-build.log
+          if-no-files-found: warn
+          retention-days: 7
