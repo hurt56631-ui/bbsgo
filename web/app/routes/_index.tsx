@@ -2,16 +2,13 @@ import { useLoaderData } from "react-router"
 
 import { EmptyState } from "@/components/common/empty-state"
 import { LoadMore } from "@/components/common/load-more"
-import { HomeAside } from "@/components/layout/home-aside"
-import { MainShell } from "@/components/layout/main-shell"
+import { LearningHome } from "@/components/learning/learning-home"
 import { TopicFeedTabs } from "@/components/topic/topic-feed-tabs"
 import { TopicListItem } from "@/components/topic/topic-list-item"
-import { TopicsNavContent } from "@/components/topic/topics-nav-content"
 import { apiFetch } from "@/lib/api/client"
 import type { PageData, Topic } from "@/lib/api/types"
 import { useI18n } from "@/lib/i18n/provider"
 import { rootDataFromMatches, siteHomeMeta } from "@/lib/seo"
-import { useDocumentTitle } from "@/lib/use-document-title"
 
 import {
   loadTopicListRouteData,
@@ -32,17 +29,17 @@ export function meta({
   return siteHomeMeta(rootDataFromMatches(matches)?.config)
 }
 
-export function TopicListRoute({ title }: { title?: string }) {
-  const { topics, categories } = useLoaderData() as TopicListRouteData
+export default function IndexRoute() {
+  const { topics } = useLoaderData() as TopicListRouteData
   const { t } = useI18n()
-  useDocumentTitle(title)
 
   return (
-    <MainShell aside={<HomeAside />}>
-      <div className="topics-wrapper">
-        <TopicsNavContent initialCategories={categories} currentCategoryId={0} />
-        <div className="topics-main">
-          <div className="rounded-lg bg-background">
+    <main className="w-full">
+      <LearningHome />
+
+      <section className="relative z-20 -mt-3 bg-[linear-gradient(180deg,#f1faf5_0%,#f7faf8_100%)] px-3 pb-8 sm:px-4">
+        <div className="mx-auto w-full max-w-[1180px]">
+          <div className="overflow-hidden rounded-[24px] border border-white/90 bg-white shadow-[0_10px_30px_rgba(58,67,96,0.08)]">
             <TopicFeedTabs currentCategoryId={0} />
             <LoadMore<Topic>
               initialItems={topics.results}
@@ -76,11 +73,7 @@ export function TopicListRoute({ title }: { title?: string }) {
             />
           </div>
         </div>
-      </div>
-    </MainShell>
+      </section>
+    </main>
   )
-}
-
-export default function IndexRoute() {
-  return <TopicListRoute />
 }
