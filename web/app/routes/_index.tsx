@@ -29,13 +29,15 @@ export function meta({
   return siteHomeMeta(rootDataFromMatches(matches)?.config)
 }
 
-export default function IndexRoute() {
+export function TopicListRoute({ title }: { title?: string }) {
   const { topics } = useLoaderData() as TopicListRouteData
   const { t } = useI18n()
 
   return (
     <main className="w-full">
-      <LearningHome />
+      {title && (
+        <h1 className="px-4 py-6 text-2xl font-bold">{title}</h1>
+      )}
 
       <section className="relative z-20 -mt-3 bg-[linear-gradient(180deg,#f1faf5_0%,#f7faf8_100%)] px-3 pb-8 sm:px-4">
         <div className="mx-auto w-full max-w-[1180px]">
@@ -75,5 +77,14 @@ export default function IndexRoute() {
         </div>
       </section>
     </main>
+  )
+}
+
+export default function IndexRoute() {
+  return (
+    <>
+      <LearningHome />
+      <TopicListRoute />
+    </>
   )
 }
