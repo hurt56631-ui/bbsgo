@@ -38,7 +38,7 @@ const quickTools = [
 
 const studyCards = [
   {
-    title: "单词",
+    title: "词汇",
     subtitle: "စကားလုံး",
     description: "高频词汇 · 分级学习",
     href: "/words",
@@ -142,25 +142,25 @@ export function LearningHome() {
                 <Link
                   key={item.title}
                   href={item.href}
-                  className={`relative min-h-[138px] overflow-hidden rounded-[24px] border p-4 shadow-[0_8px_22px_rgba(58,67,96,0.08)] transition-transform active:scale-[0.99] ${item.cardClass}`}
+                  className={`relative min-h-[122px] overflow-hidden rounded-[22px] border p-3 shadow-[0_12px_30px_rgba(58,67,96,0.14)] transition-transform active:scale-[0.99] ${item.cardClass}`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div
-                      className={`flex h-10 w-10 items-center justify-center rounded-[14px] bg-white/75 ${item.iconClass}`}
+                      className={`flex h-9 w-9 items-center justify-center rounded-[13px] bg-white/75 ${item.iconClass}`}
                     >
-                      <Icon className="h-5 w-5" />
+                      <Icon className="h-4.5 w-4.5" />
                     </div>
                     <span className="rounded-full bg-white/65 px-2 py-1 text-[9px] font-black tracking-[0.08em] text-[#707a8d]">
                       {item.badge}
                     </span>
                   </div>
-                  <h3 className="mt-3 text-[19px] font-black leading-tight">
+                  <h3 className="mt-2 text-[18px] font-black leading-tight">
                     {item.title}
                   </h3>
-                  <p className="mt-1 truncate text-[10px] text-[#7f899a]">
+                  <p className="mt-0.5 truncate text-[9px] text-[#7f899a]">
                     {item.subtitle}
                   </p>
-                  <p className="mt-2 text-[11px] font-semibold text-[#5f6879]">
+                  <p className="mt-1 text-[10px] font-semibold text-[#5f6879]">
                     {item.description}
                   </p>
                 </Link>
