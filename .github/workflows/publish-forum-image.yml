@@ -16,7 +16,7 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   # Docker/GHCR repository names must be lowercase.
-  IMAGE_NAME: hurt6465-ai/bbsgo
+  IMAGE_NAME: hurt56631-ui/bbsgo
 
 jobs:
   build:
