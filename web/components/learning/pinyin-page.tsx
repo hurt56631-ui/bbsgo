@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Mic, Play, Square, Volume2 } from "lucide-react"
+import { Mic, Square, Volume2 } from "lucide-react"
 
 import { PINYIN_SECTIONS } from "@/lib/learning/pinyin/data"
 import type {
@@ -14,11 +14,20 @@ function stopStream(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => track.stop())
 }
 
+function itemTextClass(label: string) {
+  const length = Array.from(label).length
+  if (length >= 5) return "text-[20px] sm:text-[22px]"
+  if (length === 4) return "text-[22px] sm:text-[24px]"
+  if (length === 3) return "text-[25px] sm:text-[27px]"
+  return "text-[30px] sm:text-[32px]"
+}
+
 export function PinyinPage() {
   const [activeSection, setActiveSection] =
     React.useState<PinyinSectionId>("initials")
   const [selectedItem, setSelectedItem] = React.useState<PinyinItem | null>(null)
   const [playbackRate, setPlaybackRate] = React.useState<number>(1)
+  const [speedMenuOpen, setSpeedMenuOpen] = React.useState(false)
   const [isRecording, setIsRecording] = React.useState(false)
   const [recordingUrl, setRecordingUrl] = React.useState<string | null>(null)
   const [recordingMessage, setRecordingMessage] = React.useState("")
@@ -58,6 +67,7 @@ export function PinyinPage() {
     if (sectionId === activeSection) return
     stopStandardAudio()
     setSelectedItem(null)
+    setSpeedMenuOpen(false)
     setActiveSection(sectionId)
   }
 
@@ -123,6 +133,7 @@ export function PinyinPage() {
 
   function changePlaybackRate(rate: number) {
     setPlaybackRate(rate)
+    setSpeedMenuOpen(false)
     if (audioRef.current) audioRef.current.playbackRate = rate
   }
 
@@ -162,7 +173,7 @@ export function PinyinPage() {
         recordingStreamRef.current = null
         recorderRef.current = null
         setIsRecording(false)
-        setRecordingMessage("录音完成，可以对比播放")
+        setRecordingMessage("录音完成")
       }
 
       recorder.onerror = () => {
@@ -201,30 +212,30 @@ export function PinyinPage() {
   }
 
   return (
-    <main className="min-h-[calc(100vh-56px)] bg-[#f5f6fb] pb-8 text-[#151923] dark:bg-background dark:text-foreground">
-      <div className="mx-auto w-full max-w-[760px] px-3 pb-4 pt-4 sm:px-5 sm:pt-6">
-        <div className="sticky top-14 z-40 -mx-1 bg-[#f5f6fb]/95 px-1 pb-2 pt-1 backdrop-blur-xl dark:bg-background/95">
-          <div className="rounded-[26px] bg-[#eceef4] p-1.5 dark:bg-muted/70">
-          <div className="grid grid-cols-4 gap-1">
-            {PINYIN_SECTIONS.map((section) => {
-              const active = section.id === activeSection
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  onClick={() => changeSection(section.id)}
-                  className={`h-[54px] rounded-[21px] text-[16px] font-black transition-all active:scale-[0.98] sm:h-[58px] sm:text-[17px] ${
-                    active
-                      ? "bg-white text-[#151923] shadow-[0_6px_16px_rgba(26,31,44,0.08)] dark:bg-card dark:text-card-foreground"
-                      : "text-[#7c8290] dark:text-muted-foreground"
-                  }`}
-                  aria-pressed={active}
-                >
-                  {section.label}
-                </button>
-              )
-            })}
-          </div>
+    <main className="min-h-[calc(100vh-56px)] bg-[#f6f7fb] pb-28 text-[#151923] dark:bg-background dark:text-foreground">
+      <div className="mx-auto w-full max-w-[760px] px-3 pb-4 pt-3 sm:px-5 sm:pt-5">
+        <div className="sticky top-14 z-40 -mx-1 bg-[#f6f7fb]/95 px-1 pb-2 pt-1 backdrop-blur-xl dark:bg-background/95">
+          <div className="rounded-[24px] bg-[#eceef4] p-1.5 dark:bg-muted/70">
+            <div className="grid grid-cols-4 gap-1">
+              {PINYIN_SECTIONS.map((section) => {
+                const active = section.id === activeSection
+                return (
+                  <button
+                    key={section.id}
+                    type="button"
+                    onClick={() => changeSection(section.id)}
+                    className={`h-[48px] rounded-[18px] text-[15px] font-black transition-all active:scale-[0.98] sm:h-[52px] sm:text-[16px] ${
+                      active
+                        ? "bg-white text-[#151923] shadow-[0_5px_14px_rgba(26,31,44,0.07)] dark:bg-card dark:text-card-foreground"
+                        : "text-[#7c8290] dark:text-muted-foreground"
+                    }`}
+                    aria-pressed={active}
+                  >
+                    {section.label}
+                  </button>
+                )
+              })}
+            </div>
           </div>
         </div>
 
@@ -233,7 +244,7 @@ export function PinyinPage() {
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
         >
-          <div className="grid grid-cols-4 gap-2.5 sm:grid-cols-6 sm:gap-3">
+          <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 sm:gap-2.5">
             {currentSection.items.map((item) => {
               const selected = selectedItem?.id === item.id
               return (
@@ -244,70 +255,76 @@ export function PinyinPage() {
                     if (Date.now() - lastSwipeAtRef.current < 250) return
                     void playStandard(item)
                   }}
-                  className={`relative flex min-h-[104px] items-center justify-center rounded-[22px] border bg-white px-1 text-center text-[34px] font-black leading-none shadow-[0_3px_12px_rgba(31,38,56,0.035)] transition-all active:scale-[0.96] sm:min-h-[112px] sm:text-[36px] dark:bg-card ${
+                  className={`relative aspect-square min-h-0 overflow-hidden rounded-[18px] border px-1 text-center font-black leading-none transition-all active:scale-[0.95] dark:bg-card ${
                     selected
-                      ? "border-[#8277ec] ring-2 ring-[#8277ec]/15 dark:border-primary"
-                      : "border-[#e2e4ea] dark:border-border"
-                  }`}
+                      ? "border-[#8b7cf3] bg-gradient-to-br from-[#fbfaff] to-[#f1edff] text-[#6559d9] shadow-[0_5px_16px_rgba(99,83,210,0.12)] ring-2 ring-[#8b7cf3]/10 dark:border-primary"
+                      : "border-[#e2e4ea] bg-white text-[#171b25] shadow-[0_2px_8px_rgba(31,38,56,0.03)] dark:border-border dark:text-card-foreground"
+                  } ${itemTextClass(item.label)}`}
                   aria-label={`播放 ${item.label}`}
                 >
-                  {item.label}
-                  <Volume2
-                    className={`absolute bottom-2.5 right-2.5 h-3.5 w-3.5 ${
-                      selected ? "text-[#7569e7]" : "text-[#b4b8c2]"
-                    }`}
-                  />
+                  <span className="relative z-10">{item.label}</span>
+                  {selected ? (
+                    <Volume2 className="absolute bottom-2 right-2 h-3.5 w-3.5 text-[#8274e8]" />
+                  ) : null}
                 </button>
               )
             })}
           </div>
         </div>
+      </div>
 
-        <section className="sticky bottom-3 z-30 mt-6 overflow-hidden rounded-[28px] border border-[#d9d4ff] bg-[#f2efff]/95 p-4 shadow-[0_16px_42px_rgba(45,48,70,0.20)] backdrop-blur-xl dark:border-border dark:bg-card/95 sm:p-5">
-          <div className="flex min-h-8 items-center gap-3">
-            <div className="flex h-8 min-w-8 items-center justify-center rounded-xl bg-white/80 px-2 text-xl font-black text-[#1b2030] dark:bg-muted dark:text-foreground">
+      <section className="fixed inset-x-0 bottom-0 z-50 px-3 pb-[max(10px,env(safe-area-inset-bottom))] sm:px-5">
+        <div className="relative mx-auto max-w-[760px] rounded-[24px] border border-[#ddd8ff] bg-[#f3f0ff]/95 px-3 py-3 shadow-[0_12px_36px_rgba(45,48,70,0.18)] backdrop-blur-xl dark:border-border dark:bg-card/95">
+          <div className="flex h-7 items-center gap-2.5 px-1">
+            <span className="min-w-7 text-center text-[22px] font-black leading-none text-[#1b2030] dark:text-foreground">
               {selectedItem?.label ?? "—"}
-            </div>
-            <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-[#777d8b] dark:text-muted-foreground sm:text-sm">
-              {selectedItem ? "点击播放，可调整语速后重复点读" : "点击一个拼音开始点读"}
-            </p>
-          </div>
-
-          <div className="mt-3 grid grid-cols-4 gap-2">
-            {PLAYBACK_RATES.map((rate) => (
-              <button
-                key={rate}
-                type="button"
-                onClick={() => changePlaybackRate(rate)}
-                className={`h-10 rounded-xl text-[13px] font-black transition active:scale-[0.97] ${
-                  playbackRate === rate
-                    ? "bg-[#1d2230] text-white dark:bg-primary dark:text-primary-foreground"
-                    : "bg-white/85 text-[#555d6d] dark:bg-muted dark:text-foreground"
-                }`}
-              >
-                {rate.toFixed(1)}×
-              </button>
-            ))}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-[#858a98] dark:text-muted-foreground">
+              {selectedItem ? "点击卡片可重复点读" : "点击一个拼音开始点读"}
+            </span>
           </div>
 
           <div className="mt-2 grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              disabled={!selectedItem}
-              onClick={() => void playStandard()}
-              className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl bg-white/90 px-2 text-[12px] font-black text-[#333a49] transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-45 dark:bg-muted dark:text-foreground"
-            >
-              <Play className="h-4 w-4 fill-current" />
-              标准音
-            </button>
+            <div className="relative">
+              {speedMenuOpen ? (
+                <div className="absolute bottom-[52px] left-0 z-50 w-[190px] rounded-[18px] border border-[#e1ddff] bg-white/98 p-2 shadow-[0_14px_34px_rgba(45,48,70,0.18)] backdrop-blur-xl dark:border-border dark:bg-card">
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {PLAYBACK_RATES.map((rate) => (
+                      <button
+                        key={rate}
+                        type="button"
+                        onClick={() => changePlaybackRate(rate)}
+                        className={`h-9 rounded-xl text-[12px] font-black transition active:scale-[0.96] ${
+                          playbackRate === rate
+                            ? "bg-[#1d2230] text-white dark:bg-primary dark:text-primary-foreground"
+                            : "bg-[#f4f4f7] text-[#5d6370] dark:bg-muted dark:text-foreground"
+                        }`}
+                      >
+                        {rate.toFixed(1)}×
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={() => setSpeedMenuOpen((open) => !open)}
+                className="flex h-11 w-full items-center justify-center gap-1 rounded-[14px] bg-white/90 px-2 text-[12px] font-black text-[#343a48] transition active:scale-[0.97] dark:bg-muted dark:text-foreground"
+                aria-expanded={speedMenuOpen}
+              >
+                <span className="text-[14px]">{playbackRate.toFixed(1)}×</span>
+                <span className="text-[#777d8b] dark:text-muted-foreground">语速</span>
+              </button>
+            </div>
 
             <button
               type="button"
               onClick={isRecording ? stopRecording : () => void startRecording()}
-              className={`inline-flex h-11 items-center justify-center gap-1.5 rounded-xl px-2 text-[12px] font-black transition active:scale-[0.97] ${
+              className={`inline-flex h-11 items-center justify-center gap-1.5 rounded-[14px] px-2 text-[12px] font-black transition active:scale-[0.97] ${
                 isRecording
                   ? "bg-[#1d2230] text-white dark:bg-primary dark:text-primary-foreground"
-                  : "bg-white/90 text-[#333a49] dark:bg-muted dark:text-foreground"
+                  : "bg-white/90 text-[#343a48] dark:bg-muted dark:text-foreground"
               }`}
             >
               {isRecording ? (
@@ -322,7 +339,7 @@ export function PinyinPage() {
               type="button"
               disabled={!recordingUrl}
               onClick={() => void playRecording()}
-              className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl bg-white/90 px-2 text-[12px] font-black text-[#333a49] transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-45 dark:bg-muted dark:text-foreground"
+              className="inline-flex h-11 items-center justify-center gap-1.5 rounded-[14px] bg-white/90 px-2 text-[12px] font-black text-[#343a48] transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 dark:bg-muted dark:text-foreground"
             >
               <Volume2 className="h-4 w-4" />
               我的录音
@@ -330,12 +347,12 @@ export function PinyinPage() {
           </div>
 
           {recordingMessage ? (
-            <p className="mt-2 text-center text-[11px] font-medium text-[#858a98] dark:text-muted-foreground">
+            <p className="mt-1.5 text-center text-[10px] font-medium text-[#8b8f9b] dark:text-muted-foreground">
               {recordingMessage}
             </p>
           ) : null}
-        </section>
-      </div>
+        </div>
+      </section>
 
       <audio ref={audioRef} preload="auto" className="hidden" />
       <audio ref={recordingAudioRef} preload="metadata" className="hidden" />
