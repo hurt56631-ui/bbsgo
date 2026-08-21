@@ -1,5 +1,5 @@
-import { LearningPlaceholder } from "@/components/learning/learning-placeholder"
+import { PinyinPage } from "@/components/learning/pinyin-page"
 
 export default function PinyinRoute() {
-  return <LearningPlaceholder title="拼音" subtitle="ပင်းယင်း · 声母、韵母、整体认读与声调" />
+  return <PinyinPage />
 }
