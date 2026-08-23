@@ -4,7 +4,6 @@ import (
 	"bbs-go/internal/models/constants"
 	"bbs-go/internal/models/req"
 	"bbs-go/internal/pkg/locales"
-	"bbs-go/internal/pkg/search"
 	"errors"
 	"log/slog"
 	"math"
@@ -22,6 +21,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cast"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"bbs-go/internal/models"
 )
@@ -97,20 +97,24 @@ func (s *articleService) UpdateColumn(id int64, name string, value interface{}) 
 }
 
 func (s *articleService) Delete(id int64) error {
+	if id <= 0 {
+		return nil
+	}
 	deleted := false
 	err := sqls.WithTransaction(func(ctx *sqls.TxContext) error {
-		result := ctx.Tx.Model(&models.Article{}).
-			Where("id = ? AND status <> ?", id, constants.StatusDeleted).
-			UpdateColumn("status", constants.StatusDeleted)
-		if result.Error != nil {
-			return result.Error
+		var article models.Article
+		query := ctx.Tx
+		if ctx.Tx.Dialector.Name() != "sqlite" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
-		if result.RowsAffected == 0 {
-			return nil
+		if err := query.Where("id = ?", id).Take(&article).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
 		}
 		deleted = true
-		return ctx.Tx.Model(&models.ArticleTag{}).Where("article_id = ?", id).
-			UpdateColumn("status", constants.StatusDeleted).Error
+		return hardDeleteArticleGraph(ctx, &article)
 	})
 	if err != nil {
 		return err
@@ -123,9 +127,14 @@ func (s *articleService) Delete(id int64) error {
 	if s.tagsCache != nil {
 		s.tagsCache.invalidate(id)
 	}
-	if err := search.DeleteArticleIndex(id); err != nil {
-		slog.Error("queue article index delete failed", slog.Int64("articleId", id), slog.Any("err", err))
+	if err := SearchDeleteService.ProcessEntity(constants.EntityArticle, id); err != nil {
+		slog.Error("article index delete failed; durable retry queued", slog.Int64("articleId", id), slog.Any("err", err))
 	}
+	go func() {
+		if err := StorageDeleteService.ProcessPending(100); err != nil {
+			slog.Warn("immediate article media cleanup incomplete", slog.Int64("articleId", id), slog.Any("err", err))
+		}
+	}()
 	return nil
 }
 
@@ -246,10 +255,13 @@ func (s *articleService) GetArticles(cursor int64) (articles []models.Article, n
 	if cursor > 0 {
 		query = query.Where("id < ?", cursor)
 	}
-	_ = query.Order("id DESC").Limit(limit).Find(&articles).Error
+	_ = query.Order("id DESC").Limit(limit + 1).Find(&articles).Error
+	hasMore = len(articles) > limit
+	if hasMore {
+		articles = articles[:limit]
+	}
 	if len(articles) > 0 {
 		nextCursor = articles[len(articles)-1].Id
-		hasMore = len(articles) >= limit
 	} else {
 		nextCursor = cursor
 	}
@@ -262,25 +274,35 @@ func (s *articleService) GetArticles(cursor int64) (articles []models.Article, n
 // 标签文章列表
 func (s *articleService) GetTagArticles(tagId int64, cursor int64) (articles []models.Article, nextCursor int64, hasMore bool) {
 	limit := 20
-	cnd := sqls.NewCnd().Eq("tag_id", tagId).Eq("status", constants.StatusOk).Desc("id").Limit(limit)
+	cnd := sqls.NewCnd().Eq("tag_id", tagId).Eq("status", constants.StatusOk).Desc("id").Limit(limit + 1)
 	if cursor > 0 {
 		cnd.Lt("id", cursor)
 	}
 	nextCursor = cursor
 	articleTags := repositories.ArticleTagRepository.Find(sqls.DB(), cnd)
+	hasMore = len(articleTags) > limit
+	if hasMore {
+		articleTags = articleTags[:limit]
+	}
 	if len(articleTags) > 0 {
 		var articleIds []int64
 		for _, articleTag := range articleTags {
 			articleIds = append(articleIds, articleTag.ArticleId)
 			nextCursor = articleTag.Id
 		}
+		// IN queries do not guarantee the same order as the article-tag cursor.
+		// Rebuild the result in relation order so paging remains stable and does
+		// not visibly reshuffle articles between requests.
+		byID := make(map[int64]models.Article, len(articleIds))
 		for _, article := range s.GetArticleInIds(articleIds) {
-			if article.Status == constants.StatusOk {
+			byID[article.Id] = article
+		}
+		for _, articleTag := range articleTags {
+			if article, ok := byID[articleTag.ArticleId]; ok && article.Status == constants.StatusOk {
 				articles = append(articles, article)
 			}
 		}
 	}
-	hasMore = len(articleTags) >= limit
 	return
 }
 
@@ -343,7 +365,7 @@ func (s *articleService) Publish(userId int64, form req.CreateArticleReq) (artic
 	})
 	if err == nil {
 		s.InvalidateListCache()
-		search.UpdateArticleIndex(article)
+		SearchDeleteService.RefreshArticleIndex(article.Id, article)
 	}
 
 	return
@@ -364,9 +386,35 @@ func (s *articleService) Edit(articleId int64, tags []string, title, content str
 	}
 
 	err := sqls.DB().Transaction(func(tx *gorm.DB) error {
+		// Serialize edit with permanent delete. Otherwise a delete can remove the
+		// article after the preflight read and this transaction can recreate tag
+		// rows for a non-existent article.
+		var lockedArticle models.Article
+		query := tx.Where("id = ?", articleId)
+		if tx.Dialector.Name() != "sqlite" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.Take(&lockedArticle).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New(locales.Get("article.not_found"))
+			}
+			return err
+		}
+
+		// Queue pre-edit article media in the same transaction. After commit the
+		// worker re-checks current references, preserving unchanged media while
+		// reclaiming a removed cover or inline image.
+		oldMediaTargets, mediaErr := collectArticleStorageDeleteTargets(tx, &lockedArticle, nil)
+		if mediaErr != nil {
+			return mediaErr
+		}
+		if err := StorageDeleteService.EnqueueTargets(tx, oldMediaTargets); err != nil {
+			return err
+		}
+
 		updates := map[string]any{
 			"title":   title,
-			"summary": BuildArticleSummary(article.ContentType, content),
+			"summary": BuildArticleSummary(lockedArticle.ContentType, content),
 			"content": content,
 		}
 		if cover != nil {
@@ -393,13 +441,33 @@ func (s *articleService) Edit(articleId int64, tags []string, title, content str
 	}
 	if err == nil {
 		s.InvalidateListCache()
-		search.UpdateArticleIndex(s.Get(articleId))
+		SearchDeleteService.RefreshArticleIndex(articleId, s.Get(articleId))
+		go func() {
+			if err := StorageDeleteService.ProcessPending(50); err != nil {
+				slog.Warn("immediate edited-article media cleanup incomplete", slog.Int64("articleId", articleId), slog.Any("err", err))
+			}
+		}()
 	}
 	return err
 }
 
 func (s *articleService) PutTags(articleId int64, tags []string) error {
 	err := sqls.DB().Transaction(func(tx *gorm.DB) error {
+		// Match Edit/Delete lock order: root article first, then child rows.
+		// Without this lock an admin tag update can recreate article_tag rows
+		// after a concurrent permanent delete already removed the article.
+		var article models.Article
+		query := tx.Select("id").Where("id = ?", articleId)
+		if tx.Dialector.Name() != "sqlite" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.Take(&article).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New(locales.Get("article.not_found"))
+			}
+			return err
+		}
+
 		tagIds, err := repositories.TagRepository.GetOrCreates(tx, tags)
 		if err != nil {
 			return err
@@ -417,7 +485,7 @@ func (s *articleService) PutTags(articleId int64, tags []string) error {
 		s.tagsCache.invalidate(articleId)
 	}
 	s.InvalidateListCache()
-	search.UpdateArticleIndex(s.Get(articleId))
+	SearchDeleteService.RefreshArticleIndex(articleId, s.Get(articleId))
 	return nil
 }
 
@@ -464,10 +532,13 @@ func (s *articleService) GetUserArticles(userId, cursor int64) (articles []model
 	if cursor > 0 {
 		query = query.Where("id < ?", cursor)
 	}
-	_ = query.Order("id DESC").Limit(limit).Find(&articles).Error
+	_ = query.Order("id DESC").Limit(limit + 1).Find(&articles).Error
+	hasMore = len(articles) > limit
+	if hasMore {
+		articles = articles[:limit]
+	}
 	if len(articles) > 0 {
 		nextCursor = articles[len(articles)-1].Id
-		hasMore = len(articles) >= limit
 	} else {
 		nextCursor = cursor
 	}

@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/url"
+	"path"
+	"strings"
 	"sync"
 
 	"github.com/mlogclub/simple/common/strs"
@@ -14,6 +17,8 @@ import (
 	"bbs-go/internal/pkg/respath"
 	"bbs-go/internal/pkg/uploader"
 )
+
+const forumImageUploadMaxBytes int64 = 10 * 1024 * 1024
 
 var UploadService = newUploadService()
 
@@ -62,6 +67,9 @@ func (s *uploadService) ObjectURL(key string) string {
 
 // PutImage 上传图片（已有完整字节）；key 使用内容 MD5，供 CopyImage 等场景。
 func (s *uploadService) PutImage(data []byte, contentType string) (string, error) {
+	if int64(len(data)) > forumImageUploadMaxBytes {
+		return "", fmt.Errorf("image exceeds 10 MB upload limit")
+	}
 	contentType = uploader.NormalizeImageContentType(contentType)
 	key := uploader.GenerateImageKey(data, contentType)
 	opts := &uploader.PutOptions{ContentType: contentType, ContentLength: int64(len(data))}
@@ -70,6 +78,12 @@ func (s *uploadService) PutImage(data []byte, contentType string) (string, error
 
 // PutImageStream 流式上传图片；key 使用 UUID，无需先读完整 body。
 func (s *uploadService) PutImageStream(body io.Reader, contentLength int64, contentType string) (string, error) {
+	if contentLength < 0 {
+		return "", fmt.Errorf("image content length is required")
+	}
+	if contentLength > forumImageUploadMaxBytes {
+		return "", fmt.Errorf("image exceeds 10 MB upload limit")
+	}
 	contentType = uploader.NormalizeImageContentType(contentType)
 	key := uploader.GenerateImageKeyByContentType(contentType)
 	opts := &uploader.PutOptions{ContentType: contentType, ContentLength: contentLength}
@@ -90,22 +104,189 @@ func (s *uploadService) CopyImage(url string) (string, error) {
 	return u.CopyImage(cfg, url)
 }
 
-func (s *uploadService) getUploader() (uploader.Uploader, error) {
+func (s *uploadService) DeleteObject(method dto.UploadMethod, key string) error {
+	rawKey := strings.TrimSpace(strings.ReplaceAll(key, "\\", "/"))
+	if hasParentPathSegment(rawKey) {
+		return fmt.Errorf("invalid storage object key")
+	}
+	key = strings.TrimPrefix(path.Clean("/"+rawKey), "/")
+	if key == "" || key == "." || strings.HasPrefix(key, "../") {
+		return nil
+	}
+	u, err := s.getUploaderByMethod(method)
+	if err != nil {
+		return err
+	}
+	return u.DeleteObject(SysConfigService.GetUploadConfig(), key)
+}
+
+// ResolveOwnedObject converts a forum-owned public URL/path back to the
+// storage method + object key. It checks every configured backend, not only the
+// currently selected uploader: an installation may switch from local storage
+// to OSS/COS/S3 while older posts still reference the previous backend.
+// External URLs are deliberately rejected so deleting a forum post can never
+// remove a third-party resource merely because it appeared in Markdown/HTML.
+func (s *uploadService) ResolveOwnedObject(raw string) (dto.UploadMethod, string, bool) {
+	cfg := SysConfigService.GetUploadConfig()
+	current := cfg.EnableUploadMethod
+	if strs.IsBlank(string(current)) {
+		current = dto.Local
+	}
+
+	methods := []dto.UploadMethod{current, dto.Local, dto.AliyunOss, dto.TencentCos, dto.AwsS3}
+	seen := make(map[dto.UploadMethod]struct{}, len(methods))
+	for _, method := range methods {
+		if _, ok := seen[method]; ok {
+			continue
+		}
+		seen[method] = struct{}{}
+		if !uploadBackendRecognizable(cfg, method) {
+			continue
+		}
+		if method == dto.Local && !isOwnedLocalURL(raw) {
+			continue
+		}
+		if key, ok := resolveOwnedObjectKey(cfg, method, raw); ok {
+			return method, key, true
+		}
+	}
+	return current, "", false
+}
+
+func hasParentPathSegment(value string) bool {
+	value = strings.ReplaceAll(strings.TrimSpace(value), "\\", "/")
+	for _, segment := range strings.Split(value, "/") {
+		if segment == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+func isForumManagedObjectKey(key string) bool {
+	key = strings.Trim(strings.TrimSpace(strings.ReplaceAll(key, "\\", "/")), "/")
+	return strings.HasPrefix(key, "images/") || strings.HasPrefix(key, "attachments/") ||
+		strings.HasPrefix(key, "test/images/") || strings.HasPrefix(key, "test/attachments/")
+}
+
+func uploadBackendRecognizable(cfg dto.UploadConfig, method dto.UploadMethod) bool {
+	switch method {
+	case dto.Local:
+		return true
+	case dto.AliyunOss:
+		// Host is enough to recognize ownership. Missing credentials should keep
+		// the durable delete task retrying instead of silently losing cleanup.
+		return !strs.IsBlank(cfg.AliyunOss.Host)
+	case dto.TencentCos:
+		return !strs.IsBlank(cfg.TencentCos.Bucket) && !strs.IsBlank(cfg.TencentCos.Region)
+	case dto.AwsS3:
+		return !strs.IsBlank(cfg.AwsS3.Bucket) && !strs.IsBlank(cfg.AwsS3.Region)
+	default:
+		return false
+	}
+}
+
+func isOwnedLocalURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	if parsed.Host == "" {
+		return strings.Contains(parsed.Path, respath.UploadsURLPrefix) || strings.Contains(raw, respath.UploadsURLPrefix)
+	}
+	base, err := url.Parse(strings.TrimSpace(SysConfigService.GetBaseURL()))
+	return err == nil && base != nil && base.Host != "" && strings.EqualFold(base.Host, parsed.Host)
+}
+
+func resolveOwnedObjectKey(cfg dto.UploadConfig, method dto.UploadMethod, raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", false
+	}
+
+	cleanKey := func(value string) (string, bool) {
+		value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+		if hasParentPathSegment(value) {
+			return "", false
+		}
+		value = strings.TrimPrefix(path.Clean("/"+value), "/")
+		if value == "" || value == "." || strings.HasPrefix(value, "../") {
+			return "", false
+		}
+		if !isForumManagedObjectKey(value) {
+			return "", false
+		}
+		return value, true
+	}
+	stripHostPrefix := func(base string) (string, bool) {
+		baseURL, e := url.Parse(strings.TrimSpace(base))
+		if e != nil || baseURL.Host == "" || parsed.Host == "" || !strings.EqualFold(baseURL.Host, parsed.Host) {
+			return "", false
+		}
+		basePath := strings.TrimSuffix(baseURL.Path, "/")
+		objectPath := parsed.Path
+		if basePath != "" && basePath != "/" {
+			if objectPath != basePath && !strings.HasPrefix(objectPath, basePath+"/") {
+				return "", false
+			}
+			objectPath = strings.TrimPrefix(objectPath, basePath)
+		}
+		return cleanKey(objectPath)
+	}
+
+	switch method {
+	case dto.Local:
+		objectPath := parsed.Path
+		if parsed.Host == "" {
+			objectPath = raw
+		}
+		prefix := respath.UploadsURLPrefix
+		idx := strings.Index(objectPath, prefix)
+		if idx < 0 {
+			return "", false
+		}
+		return cleanKey(objectPath[idx+len(prefix):])
+	case dto.AliyunOss:
+		return stripHostPrefix(cfg.AliyunOss.Host)
+	case dto.TencentCos:
+		expected := fmt.Sprintf("%s.cos.%s.myqcloud.com", cfg.TencentCos.Bucket, cfg.TencentCos.Region)
+		if parsed.Host == "" || !strings.EqualFold(parsed.Host, expected) {
+			return "", false
+		}
+		return cleanKey(parsed.Path)
+	case dto.AwsS3:
+		expected := fmt.Sprintf("%s.s3.%s.amazonaws.com", cfg.AwsS3.Bucket, cfg.AwsS3.Region)
+		if parsed.Host == "" || !strings.EqualFold(parsed.Host, expected) {
+			return "", false
+		}
+		return cleanKey(parsed.Path)
+	default:
+		return "", false
+	}
+}
+
+func (s *uploadService) getUploaderByMethod(method dto.UploadMethod) (uploader.Uploader, error) {
 	s.once.Do(func() {
 		s.uploaderMap[dto.Local] = &uploader.LocalUploader{}
 		s.uploaderMap[dto.AliyunOss] = &uploader.AliyunOssUploader{}
 		s.uploaderMap[dto.TencentCos] = &uploader.TencentCosUploader{}
 		s.uploaderMap[dto.AwsS3] = &uploader.AwsS3Uploader{}
 	})
-	cfg := SysConfigService.GetUploadConfig()
-
-	if strs.IsBlank(string(cfg.EnableUploadMethod)) {
-		cfg.EnableUploadMethod = dto.Local
+	if strs.IsBlank(string(method)) {
+		method = dto.Local
 	}
-
-	u, ok := s.uploaderMap[cfg.EnableUploadMethod]
+	u, ok := s.uploaderMap[method]
 	if !ok {
-		return nil, fmt.Errorf("error: Upload method: %s not found", cfg.EnableUploadMethod)
+		return nil, fmt.Errorf("error: Upload method: %s not found", method)
 	}
 	return u, nil
+}
+
+func (s *uploadService) getUploader() (uploader.Uploader, error) {
+	cfg := SysConfigService.GetUploadConfig()
+	return s.getUploaderByMethod(cfg.EnableUploadMethod)
 }

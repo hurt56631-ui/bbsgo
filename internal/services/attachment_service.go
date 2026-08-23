@@ -3,8 +3,10 @@ package services
 import (
 	"errors"
 	"io"
+	"log/slog"
 	"net/url"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/mlogclub/simple/common/dates"
@@ -16,6 +18,8 @@ import (
 	"bbs-go/internal/pkg/locales"
 	"bbs-go/internal/pkg/uploader"
 	"bbs-go/internal/repositories"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var AttachmentService = new(attachmentService)
@@ -41,6 +45,15 @@ func (s *attachmentService) Upload(userId int64, filename string, content io.Rea
 		downloadScore = 0
 	}
 	cfg := SysConfigService.GetAttachmentConfig()
+	if !cfg.Enabled {
+		return nil, errors.New(locales.Get("attachment.disabled"))
+	}
+	if contentLength < 0 {
+		return nil, errors.New("attachment size is required")
+	}
+	if cfg.MaxSizeMB > 0 && contentLength > int64(cfg.MaxSizeMB)*1024*1024 {
+		return nil, errors.New("attachment exceeds configured size limit")
+	}
 	ext := strings.ToLower(filepath.Ext(filename))
 	if !s.extAllowed(ext, cfg.AllowedTypes) {
 		return nil, errors.New(locales.Get("attachment.ext_not_allowed"))
@@ -68,6 +81,22 @@ func (s *attachmentService) Upload(userId int64, filename string, content io.Rea
 		UpdateTime:    dates.NowTimestamp(),
 	}
 	if err := repositories.AttachmentRepository.Create(sqls.DB(), att); err != nil {
+		// The object was already uploaded. Roll it back immediately. If the
+		// provider is temporarily unavailable, persist the same cleanup target in
+		// the durable outbox instead of silently leaking the orphan forever.
+		if method, objectKey, ok := UploadService.ResolveOwnedObject(fileUrl); ok {
+			if deleteErr := UploadService.DeleteObject(method, objectKey); deleteErr != nil {
+				target := storageDeleteTarget{Backend: string(method), ObjectKey: objectKey}
+				if queueErr := StorageDeleteService.EnqueueTargets(sqls.DB(), []storageDeleteTarget{target}); queueErr != nil {
+					slog.Error("failed attachment upload left an object that could not be queued for cleanup",
+						slog.String("backend", string(method)), slog.String("objectKey", objectKey),
+						slog.Any("deleteErr", deleteErr), slog.Any("queueErr", queueErr))
+				} else {
+					slog.Warn("failed attachment upload cleanup queued for retry",
+						slog.String("backend", string(method)), slog.String("objectKey", objectKey), slog.Any("err", deleteErr))
+				}
+			}
+		}
 		return nil, err
 	}
 	return att, nil
@@ -184,16 +213,41 @@ func (s *attachmentService) Download(attachmentId string, userId int64) (redirec
 		return redirectURL, nil
 	}
 
-	// 需扣积分：事务内扣费 + 写 UserScoreLog + 插入 download_log
+	// 需扣积分：按“帖子根记录 -> 附件 -> 用户/购买记录”的固定顺序加锁。
+	// 这样管理员物理删帖不能夹在校验与扣积分之间，避免帖子已经删除后
+	// 晚到的下载事务重新插入购买记录并扣掉用户积分。
 	err = sqls.WithTransaction(func(ctx *sqls.TxContext) error {
+		var lockedTopic models.Topic
+		topicQuery := ctx.Tx.Select("id, status").Where("id = ?", att.TopicId)
+		if ctx.Tx.Dialector.Name() != "sqlite" {
+			topicQuery = topicQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if e := topicQuery.Take(&lockedTopic).Error; e != nil || lockedTopic.Status == constants.StatusDeleted {
+			return errors.New(locales.Get("attachment.not_found"))
+		}
+
+		var lockedAtt models.Attachment
+		attQuery := ctx.Tx.Where("id = ?", attachmentId)
+		if ctx.Tx.Dialector.Name() != "sqlite" {
+			attQuery = attQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if e := attQuery.Take(&lockedAtt).Error; e != nil || lockedAtt.Status != constants.StatusOk || lockedAtt.TopicId != lockedTopic.Id {
+			return errors.New(locales.Get("attachment.not_found"))
+		}
+		// Another concurrent download may have completed while this request was
+		// waiting for the locks. Re-check inside the transaction before charging.
+		if repositories.AttachmentDownloadLogRepository.Exists(ctx.Tx, userId, attachmentId) {
+			return nil
+		}
+
 		user := repositories.UserRepository.Get(ctx.Tx, userId)
 		if user == nil {
 			return errors.New(locales.Get("common.not_found"))
 		}
-		if user.Score < att.DownloadScore {
+		if user.Score < lockedAtt.DownloadScore {
 			return errors.New(locales.Get("attachment.insufficient_score"))
 		}
-		if err := UserService.DecrScoreTx(ctx, userId, att.DownloadScore, constants.SourceTypeAttachmentDownload, attachmentId, locales.Get("attachment.download_deduct")); err != nil {
+		if err := UserService.DecrScoreTx(ctx, userId, lockedAtt.DownloadScore, constants.SourceTypeAttachmentDownload, attachmentId, locales.Get("attachment.download_deduct")); err != nil {
 			return err
 		}
 		if err := repositories.AttachmentDownloadLogRepository.Create(ctx.Tx, &models.AttachmentDownloadLog{
@@ -241,8 +295,45 @@ func (s *attachmentService) ReplaceTopicAttachments(ctx *sqls.TxContext, topicId
 		}
 	}
 
-	// 从当前中移除的：解绑 + 软删除
+	// The topic root row is already locked by TopicService.Edit. Build one
+	// deterministic lock set containing both currently-bound attachments and
+	// requested attachments, then acquire every attachment row in lexical ID
+	// order. This prevents A->B / B->A attachment swaps from deadlocking when
+	// two topic edits run concurrently.
 	current := repositories.AttachmentRepository.ListByTopicId(ctx.Tx, topicId)
+	lockSet := make(map[string]struct{}, len(current)+len(attachmentIds))
+	for _, att := range current {
+		if strs.IsNotBlank(att.Id) {
+			lockSet[att.Id] = struct{}{}
+		}
+	}
+	for _, aid := range attachmentIds {
+		if strs.IsNotBlank(aid) {
+			lockSet[aid] = struct{}{}
+		}
+	}
+	lockIDs := make([]string, 0, len(lockSet))
+	for id := range lockSet {
+		lockIDs = append(lockIDs, id)
+	}
+	sort.Strings(lockIDs)
+	locked := make(map[string]models.Attachment, len(lockIDs))
+	for _, aid := range lockIDs {
+		var att models.Attachment
+		query := ctx.Tx.Where("id = ?", aid)
+		if ctx.Tx.Dialector.Name() != "sqlite" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.Take(&att).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New(locales.Get("attachment.no_permission"))
+			}
+			return err
+		}
+		locked[aid] = att
+	}
+
+	// 从当前中移除的：解绑 + 软删除
 	for _, att := range current {
 		if !newSet[att.Id] {
 			if err := repositories.AttachmentRepository.Updates(ctx.Tx, att.Id, map[string]interface{}{
@@ -258,8 +349,8 @@ func (s *attachmentService) ReplaceTopicAttachments(ctx *sqls.TxContext, topicId
 		if strs.IsBlank(aid) {
 			continue
 		}
-		att := repositories.AttachmentRepository.Get(ctx.Tx, aid)
-		if att == nil || att.UserId != userId {
+		att, ok := locked[aid]
+		if !ok || att.UserId != userId || att.Status != constants.StatusOk {
 			return errors.New(locales.Get("attachment.no_permission"))
 		}
 		if att.TopicId != 0 && att.TopicId != topicId {
@@ -281,7 +372,7 @@ func (s *attachmentService) CheckAttachmentsExistAndOwned(ctx *sqls.TxContext, u
 			continue
 		}
 		att := repositories.AttachmentRepository.Get(ctx.Tx, aid)
-		if att == nil || att.UserId != userId {
+		if att == nil || att.UserId != userId || att.Status != constants.StatusOk {
 			return errors.New(locales.Get("attachment.no_permission"))
 		}
 		if att.TopicId != 0 && att.TopicId != topicId {

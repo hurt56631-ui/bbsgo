@@ -7,7 +7,6 @@ import (
 	"bbs-go/internal/pkg/errs"
 	"bbs-go/internal/pkg/event"
 	"bbs-go/internal/pkg/locales"
-	"bbs-go/internal/pkg/search"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -113,7 +112,7 @@ func (s *topicService) Updates(id int64, columns map[string]interface{}) error {
 
 	s.InvalidateListCaches()
 	// 添加索引
-	search.UpdateTopicIndex(s.Get(id))
+	SearchDeleteService.RefreshTopicIndex(id, s.Get(id))
 
 	return nil
 }
@@ -125,7 +124,7 @@ func (s *topicService) UpdateColumn(id int64, name string, value interface{}) er
 
 	s.InvalidateListCaches()
 	// 添加索引
-	search.UpdateTopicIndex(s.Get(id))
+	SearchDeleteService.RefreshTopicIndex(id, s.Get(id))
 
 	return nil
 }
@@ -156,31 +155,39 @@ func hasQaBountyReward(tx *gorm.DB, topicId int64) (bool, error) {
 	return rewards > 0, err
 }
 
-// Delete 删除
+// Delete permanently removes a topic and its owned database graph.
+// A row lock serializes concurrent requests; after commit the topic row no longer exists.
 func (s *topicService) Delete(topicId, deleteUserId int64, r *http.Request) error {
-	topic := s.Get(topicId)
-	if topic == nil {
+	if topicId <= 0 {
 		return nil
 	}
-	deleted := false
-	err := sqls.WithTransaction(func(ctx *sqls.TxContext) error {
-		// The status transition is the idempotency guard. Only the request that
-		// actually changes the row may refund bounty, decrement counters or emit
-		// the delete event after commit.
-		result := ctx.Tx.Model(&models.Topic{}).
-			Where("id = ? AND status <> ?", topicId, constants.StatusDeleted).
-			UpdateColumn("status", constants.StatusDeleted)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return nil
-		}
-		deleted = true
 
-		// Refund only when the bounty is still held in escrow. If an accepted
-		// answer was paid and later deleted, the answerer keeps that irreversible
-		// transfer and the topic owner must not receive a second payout.
+	var (
+		deletedTopic    *models.Topic
+		emitDeleteEvent bool
+	)
+	err := sqls.WithTransaction(func(ctx *sqls.TxContext) error {
+		// Lock the row instead of relying on a permanent soft-delete state. This
+		// serializes concurrent delete requests while also allowing old rows that
+		// were soft-deleted by a previous release to be physically purged.
+		var topic models.Topic
+		query := ctx.Tx
+		if ctx.Tx.Dialector.Name() != "sqlite" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.Where("id = ?", topicId).Take(&topic).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+
+		wasVisible := topic.Status != constants.StatusDeleted
+		deletedTopic = &topic
+		emitDeleteEvent = wasVisible
+
+		// Refund only when the bounty is still held in escrow. Ledger rows are
+		// deliberately retained for accounting even though the topic is removed.
 		if topic.Type == constants.TopicTypeQA && topic.BountyScore > 0 {
 			deductions, refunds, rewards, err := qaBountyLedger(ctx.Tx, topic.Id)
 			if err != nil {
@@ -193,37 +200,46 @@ func (s *topicService) Delete(topicId, deleteUserId int64, r *http.Request) erro
 				}
 			}
 		}
-		if err := UserService.DecrTopicCount(ctx, topic.UserId); err != nil {
-			return err
+
+		// Previous soft-delete releases already decremented topic_count. Only a
+		// row that was still visible can contribute another decrement here.
+		if wasVisible {
+			if err := UserService.DecrTopicCount(ctx, topic.UserId); err != nil {
+				return err
+			}
 		}
-		// 话题标签软删除
-		if err := TopicTagService.DeleteByTopicId(ctx, topicId); err != nil {
-			return err
-		}
-		// 附件软删除（同一事务内执行，避免 SQLite 卡住）
-		if err := AttachmentService.SoftDeleteByTopicId(ctx, topicId); err != nil {
-			return err
-		}
-		return nil
+		return hardDeleteTopicGraph(ctx, &topic)
 	})
 	if err != nil {
 		return err
 	}
-	if !deleted {
+	if deletedTopic == nil {
 		return nil
 	}
+
 	s.InvalidateListCaches()
 	if s.tagsCache != nil {
 		s.tagsCache.invalidate(topicId)
 	}
-	if err := search.DeleteTopicIndex(topicId); err != nil {
-		slog.Error("queue topic index delete failed", slog.Int64("topicId", topicId), slog.Any("err", err))
+	if err := SearchDeleteService.ProcessEntity(constants.EntityTopic, topicId); err != nil {
+		slog.Error("topic index delete failed; durable retry queued", slog.Int64("topicId", topicId), slog.Any("err", err))
 	}
-	event.Send(event.TopicDeleteEvent{
-		UserId:       topic.UserId,
-		TopicId:      topic.Id,
-		DeleteUserId: deleteUserId,
-	})
+	ForumRealtimeService.ForgetTopic(topicId)
+	// Media rows were queued in the same transaction as the physical delete.
+	// Try them immediately; the scheduler will retry any transient failures.
+	go func() {
+		if err := StorageDeleteService.ProcessPending(100); err != nil {
+			slog.Warn("immediate topic media cleanup incomplete", slog.Int64("topicId", topicId), slog.Any("err", err))
+		}
+	}()
+	if emitDeleteEvent {
+		event.Send(event.TopicDeleteEvent{
+			UserId:       deletedTopic.UserId,
+			TopicId:      deletedTopic.Id,
+			TopicTitle:   deletedTopic.GetTitle(),
+			DeleteUserId: deleteUserId,
+		})
+	}
 	return nil
 }
 
@@ -281,7 +297,7 @@ func (s *topicService) Undelete(id int64) error {
 	if s.tagsCache != nil {
 		s.tagsCache.invalidate(id)
 	}
-	search.UpdateTopicIndex(s.Get(id))
+	SearchDeleteService.RefreshTopicIndex(id, s.Get(id))
 	return nil
 }
 
@@ -324,20 +340,52 @@ func (s *topicService) Edit(userId, topicId int64, form req.EditTopicReq) error 
 	}
 
 	hideContent := form.HideContent
-	if topic.Type == constants.TopicTypeQA {
-		// QA 话题忽略隐藏内容变更。
-		hideContent = topic.HideContent
-	}
 
 	err := sqls.WithTransaction(func(ctx *sqls.TxContext) error {
 		var (
 			tagIds []int64
 			err    error
 		)
+
+		// Serialize edit with permanent delete. Reading the topic before opening
+		// this transaction is only a preflight check; without this root row lock a
+		// concurrent delete could commit first and this edit could recreate tags or
+		// attachments for a topic row that no longer exists.
+		var lockedTopic models.Topic
+		query := ctx.Tx.Where("id = ?", topicId)
+		if ctx.Tx.Dialector.Name() != "sqlite" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err = query.Take(&lockedTopic).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New(locales.Get("common.not_found"))
+			}
+			return err
+		}
+		if !category.Type.Supports(lockedTopic.Type) {
+			return errors.New(locales.Get("topic.category_type_mismatch"))
+		}
+		if lockedTopic.Type == constants.TopicTypeQA {
+			// QA topics ignore hide-content changes.
+			hideContent = lockedTopic.HideContent
+		}
+
+		// Queue the topic's pre-edit media in the same transaction. After commit
+		// the delete worker re-checks live references, so media still present in
+		// the edited topic/attachments is kept while removed inline images and
+		// detached attachments are physically reclaimed.
+		oldMediaTargets, mediaErr := collectTopicStorageDeleteTargets(ctx.Tx, &lockedTopic, nil)
+		if mediaErr != nil {
+			return mediaErr
+		}
+		if err = StorageDeleteService.EnqueueTargets(ctx.Tx, oldMediaTargets); err != nil {
+			return err
+		}
+
 		if err = repositories.TopicRepository.Updates(ctx.Tx, topicId, map[string]interface{}{
 			"category_id":  form.CategoryId,
 			"title":        form.Title,
-			"summary":      BuildTopicSummary(topic.Type, topic.ContentType, form.Content),
+			"summary":      BuildTopicSummary(lockedTopic.Type, lockedTopic.ContentType, form.Content),
 			"content":      form.Content,
 			"hide_content": hideContent,
 		}); err != nil {
@@ -375,12 +423,20 @@ func (s *topicService) Edit(userId, topicId int64, form req.EditTopicReq) error 
 		s.tagsCache.invalidate(topicId)
 	}
 	// 添加索引
-	search.UpdateTopicIndex(s.Get(topicId))
+	SearchDeleteService.RefreshTopicIndex(topicId, s.Get(topicId))
 
 	event.Send(event.TopicUpdateEvent{
 		UserId:  userId,
 		TopicId: topicId,
 	})
+
+	// Most edit-time media deletes complete immediately. Transient object
+	// storage failures remain in the durable outbox for the scheduler.
+	go func() {
+		if err := StorageDeleteService.ProcessPending(100); err != nil {
+			slog.Warn("immediate edited-topic media cleanup incomplete", slog.Int64("topicId", topicId), slog.Any("err", err))
+		}
+	}()
 
 	return nil
 }
@@ -414,7 +470,7 @@ func (s *topicService) SetRecommend(topicId int64, recommend bool) error {
 	})
 
 	// 添加索引
-	search.UpdateTopicIndex(s.Get(topicId))
+	SearchDeleteService.RefreshTopicIndex(topicId, s.Get(topicId))
 
 	return nil
 }
@@ -546,7 +602,7 @@ func (s *topicService) _GetCategoryTopics(categoryId, cursor int64, limit int, q
 		if cursor > 0 {
 			query = query.Where("id < ?", cursor)
 		}
-		query = query.Where("status = ?", constants.StatusOk).Order("id DESC").Limit(limit)
+		query = query.Where("status = ?", constants.StatusOk).Order("id DESC").Limit(limit + 1)
 	} else {
 		if cursor > 0 {
 			if cursorTime, cursorId, ok := decodeTimelineCursor(cursor); ok {
@@ -556,9 +612,13 @@ func (s *topicService) _GetCategoryTopics(categoryId, cursor int64, limit int, q
 			}
 		}
 		query = query.Where("status = ?", constants.StatusOk).
-			Order("last_comment_time DESC").Order("id DESC").Limit(limit)
+			Order("last_comment_time DESC").Order("id DESC").Limit(limit + 1)
 	}
 	_ = query.Find(&topics).Error
+	hasMore = len(topics) > limit
+	if hasMore {
+		topics = topics[:limit]
+	}
 	s.hydrateTweetContents(topics)
 
 	if len(topics) > 0 {
@@ -568,7 +628,6 @@ func (s *topicService) _GetCategoryTopics(categoryId, cursor int64, limit int, q
 		} else {
 			nextCursor = encodeTimelineCursor(last.LastCommentTime, last.Id)
 		}
-		hasMore = len(topics) >= limit
 	} else {
 		nextCursor = cursor
 	}
@@ -591,13 +650,16 @@ func (s *topicService) _GetFollowTopics(userId int64, cursor int64) (topics []mo
 			query = query.Where("create_time < ?", cursor)
 		}
 	}
-	query = query.Order("create_time DESC").Order("id DESC").Limit(limit)
+	query = query.Order("create_time DESC").Order("id DESC").Limit(limit + 1)
 	var userFeeds []models.UserFeed
 	_ = query.Find(&userFeeds).Error
+	hasMore = len(userFeeds) > limit
+	if hasMore {
+		userFeeds = userFeeds[:limit]
+	}
 	if len(userFeeds) > 0 {
 		last := userFeeds[len(userFeeds)-1]
 		nextCursor = encodeTimelineCursor(last.CreateTime, last.Id)
-		hasMore = len(userFeeds) >= limit
 	} else {
 		nextCursor = cursor
 	}
@@ -624,9 +686,13 @@ func (s *topicService) GetTagTopics(tagId, cursor int64) (topics []models.Topic,
 			query = query.Where("last_comment_time < ?", cursor)
 		}
 	}
-	query = query.Order("last_comment_time DESC").Order("id DESC").Limit(limit)
+	query = query.Order("last_comment_time DESC").Order("id DESC").Limit(limit + 1)
 	var topicTags []models.TopicTag
 	_ = query.Find(&topicTags).Error
+	hasMore = len(topicTags) > limit
+	if hasMore {
+		topicTags = topicTags[:limit]
+	}
 	if len(topicTags) > 0 {
 		last := topicTags[len(topicTags)-1]
 		nextCursor = encodeTimelineCursor(last.LastCommentTime, last.Id)
@@ -647,7 +713,6 @@ func (s *topicService) GetTagTopics(tagId, cursor int64) (topics []models.Topic,
 	} else {
 		nextCursor = cursor
 	}
-	hasMore = len(topicTags) >= limit
 	return
 }
 
@@ -832,11 +897,14 @@ func (s *topicService) GetUserTopics(userId, cursor int64) (topics []models.Topi
 	if cursor > 0 {
 		query = query.Where("id < ?", cursor)
 	}
-	_ = query.Order("id DESC").Limit(limit).Find(&topics).Error
+	_ = query.Order("id DESC").Limit(limit + 1).Find(&topics).Error
+	hasMore = len(topics) > limit
+	if hasMore {
+		topics = topics[:limit]
+	}
 	s.hydrateTweetContents(topics)
 	if len(topics) > 0 {
 		nextCursor = topics[len(topics)-1].Id
-		hasMore = len(topics) >= limit
 	} else {
 		nextCursor = cursor
 	}
@@ -922,46 +990,58 @@ func (s *topicService) SetSticky(topicId int64, sticky bool) error {
 }
 
 func (s *topicService) AcceptAnswer(topicId, commentId, userId int64, isAdmin bool) error {
-	topic := s.Get(topicId)
-	if topic == nil || topic.Status != constants.StatusOk {
+	if topicId <= 0 || commentId <= 0 {
 		return errors.New(locales.Get("common.not_found"))
-	}
-	if topic.Type != constants.TopicTypeQA {
-		return errors.New(locales.Get("topic.type_not_supported"))
-	}
-	if topic.UserId != userId && !isAdmin {
-		return errors.New(locales.Get("topic.no_permission"))
-	}
-	if topic.AcceptedCommentId == commentId && topic.QaStatus == constants.QaStatusSolved {
-		// Idempotent retry: the answer was already accepted successfully.
-		return nil
-	}
-	if topic.AcceptedCommentId > 0 || topic.QaStatus == constants.QaStatusSolved {
-		return errors.New(locales.Get("topic.answer_already_accepted"))
 	}
 
 	now := dates.NowTimestamp()
 	awardedBounty := 0
+	didAccept := false
 	var acceptedComment models.Comment
+	var lockedTopic models.Topic
 	if err := sqls.WithTransaction(func(ctx *sqls.TxContext) error {
-		// Re-read and lock the answer in the same transaction that marks the
-		// question solved. Otherwise a concurrent delete can make a deleted comment
-		// become the accepted answer between the preflight check and the update.
-		if err := ctx.Tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND status = ? AND entity_type = ? AND entity_id = ?",
-				commentId, constants.StatusOk, constants.EntityTopic, topic.Id).
-			Take(&acceptedComment).Error; err != nil {
+		// Use the same root -> comment lock order as comment deletion. The previous
+		// comment -> topic order could deadlock when accepting an answer raced with
+		// deleting that answer.
+		rootQuery := ctx.Tx.Where("id = ? AND status = ?", topicId, constants.StatusOk)
+		if ctx.Tx.Dialector.Name() != "sqlite" {
+			rootQuery = rootQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := rootQuery.Take(&lockedTopic).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New(locales.Get("common.not_found"))
+			}
+			return err
+		}
+		if lockedTopic.Type != constants.TopicTypeQA {
+			return errors.New(locales.Get("topic.type_not_supported"))
+		}
+		if lockedTopic.UserId != userId && !isAdmin {
+			return errors.New(locales.Get("topic.no_permission"))
+		}
+		if lockedTopic.AcceptedCommentId == commentId && lockedTopic.QaStatus == constants.QaStatusSolved {
+			// Idempotent retry: do not emit a second event or pay the bounty again.
+			return nil
+		}
+		if lockedTopic.AcceptedCommentId > 0 || lockedTopic.QaStatus == constants.QaStatusSolved {
+			return errors.New(locales.Get("topic.answer_already_accepted"))
+		}
+
+		answerQuery := ctx.Tx.Where("id = ? AND status = ? AND entity_type = ? AND entity_id = ?",
+			commentId, constants.StatusOk, constants.EntityTopic, lockedTopic.Id)
+		if ctx.Tx.Dialector.Name() != "sqlite" {
+			answerQuery = answerQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := answerQuery.Take(&acceptedComment).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return errors.New(locales.Get("common.not_found"))
 			}
 			return err
 		}
 
-		// Only one concurrent request may transition an unsolved topic. The
-		// conditional update protects both the bounty payout and task event.
 		result := ctx.Tx.Model(&models.Topic{}).
 			Where("id = ? AND status = ? AND accepted_comment_id = 0 AND qa_status = ?",
-				topic.Id, constants.StatusOk, constants.QaStatusUnsolved).
+				lockedTopic.Id, constants.StatusOk, constants.QaStatusUnsolved).
 			Updates(map[string]interface{}{
 				"accepted_comment_id": acceptedComment.Id,
 				"qa_status":           constants.QaStatusSolved,
@@ -974,35 +1054,39 @@ func (s *topicService) AcceptAnswer(topicId, commentId, userId int64, isAdmin bo
 			return errors.New(locales.Get("topic.answer_already_accepted"))
 		}
 
-		if topic.BountyScore > 0 && acceptedComment.UserId != topic.UserId {
+		if lockedTopic.BountyScore > 0 && acceptedComment.UserId != lockedTopic.UserId {
 			// A bounty belongs to the topic, not to an acceptance attempt. If an
 			// administrator reopens a solved topic, never pay the same escrow twice.
 			var rewardCount int64
 			if err := ctx.Tx.Model(&models.UserScoreLog{}).
 				Where("source_type = ? AND source_id = ? AND type = ?",
-					constants.SourceTypeQaBounty, strconv.FormatInt(topic.Id, 10), constants.ScoreTypeIncr).
+					constants.SourceTypeQaBounty, strconv.FormatInt(lockedTopic.Id, 10), constants.ScoreTypeIncr).
 				Count(&rewardCount).Error; err != nil {
 				return err
 			}
 			if rewardCount == 0 {
-				if err := UserService.AddScoreTx(ctx, acceptedComment.UserId, topic.BountyScore,
-					constants.SourceTypeQaBounty, strconv.FormatInt(topic.Id, 10), locales.Get("topic.bounty_reward")); err != nil {
+				if err := UserService.AddScoreTx(ctx, acceptedComment.UserId, lockedTopic.BountyScore,
+					constants.SourceTypeQaBounty, strconv.FormatInt(lockedTopic.Id, 10), locales.Get("topic.bounty_reward")); err != nil {
 					return err
 				}
-				awardedBounty = topic.BountyScore
+				awardedBounty = lockedTopic.BountyScore
 			}
 		}
+		didAccept = true
 		return nil
 	}); err != nil {
 		return err
 	}
+	if !didAccept {
+		return nil
+	}
 
 	s.InvalidateListCaches()
-	search.UpdateTopicIndex(s.Get(topic.Id))
+	SearchDeleteService.RefreshTopicIndex(lockedTopic.Id, s.Get(lockedTopic.Id))
 
 	event.Send(event.QaAnswerAcceptedEvent{
 		UserId:      acceptedComment.UserId,
-		TopicId:     topic.Id,
+		TopicId:     lockedTopic.Id,
 		CommentId:   acceptedComment.Id,
 		BountyScore: awardedBounty,
 		CreateTime:  now,

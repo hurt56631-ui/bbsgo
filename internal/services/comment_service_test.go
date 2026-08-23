@@ -20,7 +20,7 @@ func setupCommentServiceTestDB(t *testing.T) {
 	if err := db.AutoMigrate(
 		&models.Comment{}, &models.Topic{}, &models.TopicTag{}, &models.Article{},
 		&models.Role{}, &models.UserRole{}, &models.Permission{}, &models.RolePermission{},
-		&models.UserScoreLog{},
+		&models.UserScoreLog{}, &models.StorageDeleteTask{},
 	); err != nil {
 		t.Fatalf("auto migrate comment: %v", err)
 	}
@@ -286,14 +286,22 @@ func TestCommentService_DeleteNestedReplyMaintainsParentHotScore(t *testing.T) {
 		EntityId:     10,
 		Content:      "parent",
 		ContentType:  constants.ContentTypeText,
-		CommentCount: 1,
-		HotScore:     2,
+		CommentCount: 2,
+		HotScore:     4,
 	})
 	child := mustCreateComment(t, &models.Comment{
 		UserId:      2,
 		EntityType:  constants.EntityComment,
 		EntityId:    parent.Id,
 		Content:     "child",
+		ContentType: constants.ContentTypeText,
+	})
+	quotedReply := mustCreateComment(t, &models.Comment{
+		UserId:      3,
+		EntityType:  constants.EntityComment,
+		EntityId:    parent.Id,
+		QuoteId:     child.Id,
+		Content:     "reply to child",
 		ContentType: constants.ContentTypeText,
 	})
 
@@ -304,8 +312,15 @@ func TestCommentService_DeleteNestedReplyMaintainsParentHotScore(t *testing.T) {
 	if got == nil {
 		t.Fatalf("parent missing")
 	}
-	if got.CommentCount != 0 || got.HotScore != 0 {
+	if got.CommentCount != 1 || got.HotScore != 2 {
 		t.Fatalf("parent counters not repaired: replies=%d hot=%d", got.CommentCount, got.HotScore)
+	}
+	gotQuoted := CommentService.Get(quotedReply.Id)
+	if gotQuoted == nil || gotQuoted.Status != constants.StatusOk {
+		t.Fatalf("quoted sibling should remain visible: %+v", gotQuoted)
+	}
+	if gotQuoted.QuoteId != 0 {
+		t.Fatalf("dangling quote was not detached, quoteId=%d", gotQuoted.QuoteId)
 	}
 }
 
@@ -367,5 +382,48 @@ func TestCommentService_HotCommentsUseStableKeyset(t *testing.T) {
 		if _, ok := seen[item.Id]; ok {
 			t.Fatalf("duplicate comment across pages: %d", item.Id)
 		}
+	}
+}
+
+func TestCommentService_GetRepliesHasMoreUsesLookahead(t *testing.T) {
+	setupCommentServiceTestDB(t)
+	parent := mustCreateComment(t, &models.Comment{
+		UserId:      1,
+		EntityType:  constants.EntityTopic,
+		EntityId:    10,
+		Content:     "parent",
+		ContentType: constants.ContentTypeText,
+	})
+	for i := 0; i < 10; i++ {
+		mustCreateComment(t, &models.Comment{
+			UserId:      int64(i + 2),
+			EntityType:  constants.EntityComment,
+			EntityId:    parent.Id,
+			Content:     "reply",
+			ContentType: constants.ContentTypeText,
+		})
+	}
+	page, cursor, hasMore := CommentService.GetReplies(parent.Id, 0, 10)
+	if len(page) != 10 || hasMore {
+		t.Fatalf("exact final page must not report hasMore: len=%d hasMore=%v", len(page), hasMore)
+	}
+	if cursor != page[len(page)-1].Id {
+		t.Fatalf("unexpected cursor: got=%d want=%d", cursor, page[len(page)-1].Id)
+	}
+
+	mustCreateComment(t, &models.Comment{
+		UserId:      99,
+		EntityType:  constants.EntityComment,
+		EntityId:    parent.Id,
+		Content:     "last",
+		ContentType: constants.ContentTypeText,
+	})
+	page, cursor, hasMore = CommentService.GetReplies(parent.Id, 0, 10)
+	if len(page) != 10 || !hasMore {
+		t.Fatalf("lookahead row must report hasMore: len=%d hasMore=%v", len(page), hasMore)
+	}
+	lastPage, _, lastHasMore := CommentService.GetReplies(parent.Id, cursor, 10)
+	if len(lastPage) != 1 || lastHasMore {
+		t.Fatalf("last lookahead page incorrect: len=%d hasMore=%v", len(lastPage), lastHasMore)
 	}
 }
