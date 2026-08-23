@@ -16,6 +16,7 @@ import {
 } from "@/components/common/confirm-dialog"
 import { PreviewableImage } from "@/components/common/image-preview"
 import { ContentEditor } from "@/components/editor/content-editor"
+import { uploadCommunityImage } from "@/components/editor/upload"
 import { CategoryQuickSelector } from "@/components/topic/category-selector"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -262,12 +263,6 @@ function TopicAttachmentField({
   )
 }
 
-async function uploadTopicImage(file: File) {
-  const body = new FormData()
-  body.append("image", file, file.name)
-  return apiFetch<{ url: string }>("/api/upload", { method: "POST", body })
-}
-
 function imageSrc(image: ImageInfo) {
   return image.url || image.preview || ""
 }
@@ -314,7 +309,7 @@ function SimpleTopicEditor({
       try {
         const uploaded: ImageInfo[] = []
         for (const file of images) {
-          const result = await uploadTopicImage(file)
+          const result = await uploadCommunityImage(file)
           uploaded.push({ url: result.url })
         }
         onImageListChange([...(imageList || []), ...uploaded])

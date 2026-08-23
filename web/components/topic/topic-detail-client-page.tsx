@@ -198,6 +198,7 @@ export function TopicDetailClientPage({
           acceptedCommentId={topic.acceptedCommentId || 0}
           allowAcceptAnswer={canAcceptAnswer}
           initialData={comments}
+          ownerUserId={topic.user?.id}
         />
       </div>
     </MainShell>
