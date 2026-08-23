@@ -32,6 +32,18 @@ func Start() {
 		services.ViewCountService.EnableBuffering()
 	}
 
+	addCronFunc(c, "* * * * *", func() {
+		if err := services.StorageDeleteService.ProcessPending(100); err != nil {
+			slog.Warn("retry forum storage deletes incomplete", slog.Any("err", err))
+		}
+	})
+
+	addCronFunc(c, "* * * * *", func() {
+		if err := services.SearchDeleteService.ProcessPending(100); err != nil {
+			slog.Warn("retry forum search deletes incomplete", slog.Any("err", err))
+		}
+	})
+
 	addCronFunc(c, "15 4 * * *", func() {
 		deletedTokens, err := services.UserTokenService.CleanupExpired(7 * 24 * time.Hour)
 		if err != nil {
