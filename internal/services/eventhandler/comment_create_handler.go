@@ -1,10 +1,12 @@
 package eventhandler
 
 import (
+	"bbs-go/internal/handlers/render"
 	"bbs-go/internal/models"
 	"bbs-go/internal/models/constants"
 	"bbs-go/internal/pkg/common"
 	"bbs-go/internal/pkg/event"
+	"bbs-go/internal/pkg/idcodec"
 	"bbs-go/internal/pkg/locales"
 	"bbs-go/internal/pkg/msg"
 	"bbs-go/internal/services"
@@ -29,23 +31,90 @@ func handleCommentCreate(i interface{}) {
 		return
 	}
 
-	// 发送消息
-	handleMsg(comment)
+	commentMsg := getCommentMsg(comment)
+	if commentMsg == nil || commentMsg.Entity == nil {
+		return
+	}
+
+	// Existing notification messages plus a separate ephemeral realtime event for
+	// viewers who currently have this topic open.
+	handleMsg(comment, commentMsg)
+	handleForumRealtime(comment, commentMsg)
+
+	// The root can be permanently deleted after getCommentMsg() validates it but
+	// before the asynchronous notification inserts finish. The delete transaction
+	// cannot remove messages that do not exist yet, so compensate after sending if
+	// the root disappeared in that race window.
+	rootType := commentMsg.rootEntityType()
+	rootID := commentMsg.rootEntityId()
+	rootAlive := false
+	switch rootType {
+	case constants.EntityTopic:
+		topic := services.TopicService.Get(rootID)
+		rootAlive = topic != nil && topic.Status == constants.StatusOk
+	case constants.EntityArticle:
+		article := services.ArticleService.Get(rootID)
+		rootAlive = article != nil && article.Status == constants.StatusOk
+	}
+	if !rootAlive && rootID > 0 {
+		if err := services.PurgeDeletedEntityMessages(rootType, rootID); err != nil {
+			slog.Error("cleanup late comment notification failed",
+				slog.String("rootType", rootType), slog.Int64("rootId", rootID), slog.Any("err", err))
+		}
+	}
 }
 
 // 处理评论消息
-func handleMsg(comment *models.Comment) {
-	if comment == nil {
-		return
-	}
-	commentMsg := getCommentMsg(comment)
-	if commentMsg == nil || commentMsg.Entity == nil {
+func handleMsg(comment *models.Comment, commentMsg *CommentMsg) {
+	if comment == nil || commentMsg == nil || commentMsg.Entity == nil {
 		return
 	}
 
 	handleEntityMsg(comment, commentMsg)
 	handleQuoteMsg(comment, commentMsg)
 	handleReplyMsg(comment, commentMsg)
+}
+
+func handleForumRealtime(comment *models.Comment, commentMsg *CommentMsg) {
+	if comment == nil || commentMsg == nil {
+		return
+	}
+	rootType := commentMsg.rootEntityType()
+	if rootType != constants.EntityTopic && rootType != constants.EntityArticle {
+		return
+	}
+	rootID := commentMsg.rootEntityId()
+	if rootID <= 0 {
+		return
+	}
+	parentID := int64(0)
+	parentCommentCount := int64(0)
+	if comment.EntityType == constants.EntityComment {
+		parentID = comment.EntityId
+		if commentMsg.ParentComment != nil {
+			parentCommentCount = commentMsg.ParentComment.CommentCount
+		}
+	}
+	rootCommentCount := int64(0)
+	switch entity := commentMsg.Entity.(type) {
+	case *models.Topic:
+		if entity != nil {
+			rootCommentCount = entity.CommentCount
+		}
+	case *models.Article:
+		if entity != nil {
+			rootCommentCount = entity.CommentCount
+		}
+	}
+	payload := map[string]any{
+		"root_entity_type":     rootType,
+		"root_entity_id":       idcodec.Encode(rootID),
+		"root_comment_count":   rootCommentCount,
+		"parent_id":            parentID,
+		"parent_comment_count": parentCommentCount,
+		"comment":              render.BuildComment(comment),
+	}
+	services.ForumRealtimeService.PublishComment(rootType, rootID, payload)
 }
 
 // 给被回复的实体对象作者发送消息
