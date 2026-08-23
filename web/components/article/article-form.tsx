@@ -6,6 +6,7 @@ import { Plus, Trash2 } from "lucide-react"
 
 import { TagInput } from "@/components/common/tag-input"
 import { ContentEditor } from "@/components/editor/content-editor"
+import { uploadCommunityImage } from "@/components/editor/upload"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { apiFetch, toFormData } from "@/lib/api/client"
@@ -26,12 +27,6 @@ type ArticleFormState = {
 
 function isSameTags(left: string[], right: string[]) {
   return left.length === right.length && left.every((item, index) => item === right[index])
-}
-
-async function uploadImage(file: File) {
-  const body = new FormData()
-  body.append("image", file, file.name)
-  return apiFetch<ImageInfo>("/api/upload", { method: "POST", body })
 }
 
 function CoverUpload({
@@ -62,7 +57,7 @@ function CoverUpload({
 
     setUploading(true)
     try {
-      const uploaded = await uploadImage(file)
+      const uploaded = await uploadCommunityImage(file)
       onChange([{ ...uploaded, name: uploaded.name || file.name, size: uploaded.size || file.size }])
     } catch (error) {
       catchError(error)
