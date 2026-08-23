@@ -29,7 +29,7 @@ func migrate_delete_hot_path_indexes() error {
 	if err := ensureCommunityIndex(db, communityIndexSpec{
 		model: &models.UserReport{},
 		name:  "idx_user_report_data",
-		sql:   "CREATE INDEX idx_user_report_data ON t_user_report (data_type, data_id)",
+		sql:   "CREATE INDEX idx_user_report_data ON t_user_report (data_type(32), data_id)",
 	}); err != nil {
 		return err
 	}
