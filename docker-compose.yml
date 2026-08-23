@@ -44,6 +44,11 @@ services:
       NODE_ENV: production
       PORT: 3000
       BBSGO_SERVER_URL: http://127.0.0.1:8082
+      BBSGO_WUKONGIM_API_URL: ${BBSGO_WUKONGIM_API_URL:-}
+      # Forum voice files are uploaded by TangSengDaoDao. bbs-go uses this
+      # internal API plus the shared forum HMAC secret to physically delete them.
+      BBSGO_TANGSENG_API_URL: ${BBSGO_TANGSENG_API_URL:-}
+      BBSGO_TALKAMI_HMAC_SECRET: ${BBSGO_TALKAMI_HMAC_SECRET:-}
       BBSGO_INSTALL_DOCKER_BUILTIN_MYSQL: "true"
       BBSGO_DOCKER_BUILTIN_MYSQL_HOST: mysql
       BBSGO_DOCKER_BUILTIN_MYSQL_PORT: "3306"
