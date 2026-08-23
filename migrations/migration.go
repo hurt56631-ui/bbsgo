@@ -120,4 +120,9 @@ func init() {
 	register(19, "follow pagination and feed fan-out indexes", migrate_follow_indexes)
 	register(20, "topic latest and qa hot-path indexes", migrate_hot_path_indexes)
 	register(21, "comment hot score and bounty ledger indexes", migrate_comment_hot_score)
+	register(22, "comment owner-only pagination index", migrate_comment_owner_index)
+	register(23, "durable object-storage delete outbox", migrate_storage_delete_outbox)
+	register(24, "storage delete outbox index compatibility", migrate_storage_delete_outbox_v2)
+	register(25, "physical delete hot-path indexes", migrate_delete_hot_path_indexes)
+	register(26, "durable search delete outbox", migrate_search_delete_outbox)
 }
