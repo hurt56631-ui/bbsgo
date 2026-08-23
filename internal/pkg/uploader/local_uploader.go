@@ -35,6 +35,19 @@ func (u *LocalUploader) PutObject(_ dto.UploadConfig, key string, body io.Reader
 	return respath.UploadsURLPrefix + cleanKey, nil
 }
 
+func (u *LocalUploader) DeleteObject(_ dto.UploadConfig, key string) error {
+	cleanKey := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(key)), "/")
+	if cleanKey == "" || cleanKey == "." || strings.HasPrefix(cleanKey, "../") {
+		return nil
+	}
+	fullPath := respath.UploadsPath(filepath.FromSlash(cleanKey))
+	err := os.Remove(fullPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
 func (u *LocalUploader) CopyImage(cfg dto.UploadConfig, originUrl string) (string, error) {
 	data, ct, err := download(originUrl)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 
 	"github.com/mlogclub/simple/common/strs"
@@ -36,6 +37,18 @@ func (u *TencentCosUploader) PutObject(cfg dto.UploadConfig, key string, body io
 		return "", err
 	}
 	return fmt.Sprintf("%s/%s", u.client.BaseURL.BucketURL, key), nil
+}
+
+func (u *TencentCosUploader) DeleteObject(cfg dto.UploadConfig, key string) error {
+	if err := u.initClient(cfg); err != nil {
+		return err
+	}
+	key = strings.TrimPrefix(strings.TrimSpace(key), "/")
+	if key == "" {
+		return nil
+	}
+	_, err := u.client.Object.Delete(context.Background(), key)
+	return err
 }
 
 func (u *TencentCosUploader) CopyImage(cfg dto.UploadConfig, originUrl string) (string, error) {

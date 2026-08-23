@@ -27,10 +27,12 @@ type PutOptions struct {
 	ContentLength      int64  // 流式上传时 body 长度（S3 等需此值），<=0 表示未知
 }
 
-// Uploader 存储上传接口：仅提供按 key 写流与 CopyImage，不包含业务 key 策略。
+// Uploader 存储接口：按 key 写入/删除对象，并支持 CopyImage。业务 key 策略仍由上层负责。
 type Uploader interface {
 	// PutObject 按 key 流式写入；opts.ContentLength 为 body 长度，S3 等需此值。
 	PutObject(cfg dto.UploadConfig, key string, body io.Reader, opts *PutOptions) (string, error)
+	// DeleteObject 按存储 key 物理删除对象；不存在对象按成功处理。
+	DeleteObject(cfg dto.UploadConfig, key string) error
 	// CopyImage 从 originUrl 拉取图片并上传（内部使用 GenerateImageKey 生成 key）。
 	CopyImage(cfg dto.UploadConfig, originUrl string) (string, error)
 }

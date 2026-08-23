@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -48,6 +49,24 @@ func (u *AwsS3Uploader) PutObject(cfg dto.UploadConfig, key string, body io.Read
 		return "", fmt.Errorf("failed to upload object to S3: %w", err)
 	}
 	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.AwsS3.Bucket, cfg.AwsS3.Region, key), nil
+}
+
+func (u *AwsS3Uploader) DeleteObject(cfg dto.UploadConfig, key string) error {
+	if err := u.initClient(cfg); err != nil {
+		return err
+	}
+	key = strings.TrimPrefix(strings.TrimSpace(key), "/")
+	if key == "" {
+		return nil
+	}
+	_, err := u.client.DeleteObject(context.Background(), &s3.DeleteObjectInput{
+		Bucket: aws.String(cfg.AwsS3.Bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		slog.Error("AWS S3 DeleteObject failed", slog.Any("err", err), slog.String("bucket", cfg.AwsS3.Bucket), slog.String("key", key))
+	}
+	return err
 }
 
 func (u *AwsS3Uploader) CopyImage(cfg dto.UploadConfig, originUrl string) (string, error) {

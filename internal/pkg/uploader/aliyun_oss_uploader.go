@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
@@ -36,6 +37,17 @@ func (u *AliyunOssUploader) PutObject(cfg dto.UploadConfig, key string, body io.
 		return "", err
 	}
 	return bbsurls.UrlJoin(cfg.AliyunOss.Host, key), nil
+}
+
+func (u *AliyunOssUploader) DeleteObject(cfg dto.UploadConfig, key string) error {
+	if err := u.initBucket(cfg); err != nil {
+		return err
+	}
+	key = strings.TrimPrefix(strings.TrimSpace(key), "/")
+	if key == "" {
+		return nil
+	}
+	return u.bucket.DeleteObject(key)
 }
 
 func (u *AliyunOssUploader) CopyImage(cfg dto.UploadConfig, originUrl string) (string, error) {
