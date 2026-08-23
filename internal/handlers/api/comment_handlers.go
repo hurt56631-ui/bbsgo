@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bbs-go/internal/models/constants"
 	"bbs-go/internal/models/req"
 	"bbs-go/internal/pkg/common"
+	"bbs-go/internal/pkg/idcodec"
 	"bbs-go/internal/spam"
 	"strconv"
 	"strings"
@@ -25,8 +27,29 @@ func CommentComments(ctx *gin.Context) {
 		currentUser   = common.GetCurrentUser(ctx)
 		sortMode      = strings.ToLower(strings.TrimSpace(ctx.Query("sort")))
 	)
-	comments, cursor, hasMore := services.CommentService.GetCommentsSorted(entityType, entityId, cursor, sortMode)
-	ginx.WriteJSON(ctx, ginx.CursorData(render.BuildComments(comments, currentUser, true, false), strconv.FormatInt(cursor, 10), hasMore))
+	onlyOwner := ctx.Query("onlyOwner") == "1" || strings.EqualFold(strings.TrimSpace(ctx.Query("onlyOwner")), "true")
+	ownerUserID := int64(0)
+	if onlyOwner {
+		switch entityType {
+		case constants.EntityTopic:
+			if topic := services.TopicService.Get(entityId); topic != nil {
+				ownerUserID = topic.UserId
+			}
+		case constants.EntityArticle:
+			if article := services.ArticleService.Get(entityId); article != nil {
+				ownerUserID = article.UserId
+			}
+		}
+	}
+	if onlyOwner && ownerUserID <= 0 {
+		ginx.WriteJSON(ctx, ginx.CursorData([]any{}, strconv.FormatInt(cursor, 10), false))
+		return
+	}
+
+	comments, cursor, hasMore := services.CommentService.GetCommentsSortedByUser(
+		entityType, entityId, cursor, sortMode, ownerUserID,
+	)
+	ginx.WriteJSON(ctx, ginx.CursorData(render.BuildComments(comments, currentUser, !onlyOwner, false), strconv.FormatInt(cursor, 10), hasMore))
 
 }
 
@@ -67,6 +90,51 @@ func CommentCreate(ctx *gin.Context) {
 
 	ginx.WriteJSON(ctx, render.BuildComment(comment))
 
+}
+
+func CommentWatch(ctx *gin.Context) {
+	var body struct {
+		TopicID string `json:"topicId" form:"topicId"`
+		WatchID string `json:"watchId" form:"watchId"`
+		Active  bool   `json:"active" form:"active"`
+	}
+	if err := ginx.Bind(ctx, &body); err != nil {
+		ginx.WriteJSON(ctx, err)
+		return
+	}
+	topicID := idcodec.Decode(body.TopicID)
+	if topicID <= 0 {
+		ginx.WriteJSON(ctx, false)
+		return
+	}
+	if body.Active {
+		topic := services.TopicService.Get(topicID)
+		if topic == nil || topic.Status == constants.StatusDeleted {
+			// A stale/background Activity may resume after the topic was
+			// permanently removed. Return false so Android closes the stale
+			// detail page instead of believing a new realtime lease exists.
+			ginx.WriteJSON(ctx, false)
+			return
+		}
+		if topic.Status != constants.StatusOk {
+			// Review/hidden states are not equivalent to physical deletion. Do
+			// not create a realtime lease, but keep the detail page intact.
+			ginx.WriteJSON(ctx, true)
+			return
+		}
+	}
+	user := common.GetCurrentUser(ctx)
+	if user == nil || user.AuthSource != services.TalkamiAuthSource || !user.ExternalUID.Valid {
+		// Anonymous/web-only viewers have no WuKongIM uid. Keep the endpoint a no-op
+		// so normal forum reading still works without a realtime IM session.
+		ginx.WriteJSON(ctx, true)
+		return
+	}
+	uid := strings.TrimSpace(user.ExternalUID.String)
+	if uid != "" {
+		services.ForumRealtimeService.WatchTopic(topicID, uid, body.WatchID, body.Active)
+	}
+	ginx.WriteJSON(ctx, true)
 }
 
 func CommentRemove(ctx *gin.Context) {
