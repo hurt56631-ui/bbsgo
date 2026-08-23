@@ -25,9 +25,10 @@ type TopicUpdateEvent struct {
 }
 
 type TopicDeleteEvent struct {
-	UserId       int64 `json:"userId"`
-	TopicId      int64 `json:"topicId"`
-	DeleteUserId int64 `json:"deleteUserId"`
+	UserId       int64  `json:"userId"`
+	TopicId      int64  `json:"topicId"`
+	TopicTitle   string `json:"topicTitle"`
+	DeleteUserId int64  `json:"deleteUserId"`
 }
 
 type UserLikeEvent struct {
