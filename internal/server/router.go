@@ -253,6 +253,7 @@ func registerAPIRoutes(group *gin.RouterGroup) {
 	commentGroup.GET("/comments", apiHandlers.CommentComments)
 	commentGroup.GET("/replies", apiHandlers.CommentReplies)
 	commentGroup.POST("/create", apiHandlers.CommentCreate)
+	commentGroup.POST("/watch", apiHandlers.CommentWatch)
 	commentGroup.POST("/delete/:id", apiHandlers.CommentRemove)
 
 	favoriteGroup := group.Group("/favorite")
