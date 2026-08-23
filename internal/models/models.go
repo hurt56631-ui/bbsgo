@@ -19,7 +19,7 @@ var Models = []interface{}{
 	&UserScoreLog{}, &UserExpLog{},
 	&OperateLog{}, &EmailLog{}, &EmailCode{}, &SmsCode{}, &CheckIn{}, &UserFollow{}, &UserFeed{}, &UserReport{},
 	&ForbiddenWord{},
-	&Attachment{}, &AttachmentDownloadLog{},
+	&Attachment{}, &AttachmentDownloadLog{}, &StorageDeleteTask{}, &SearchDeleteTask{},
 }
 
 type Model struct {
@@ -584,6 +584,37 @@ type ForbiddenWord struct {
 	Word       string `gorm:"size:128" json:"word" form:"word"`      // 违禁词
 	Remark     string `gorm:"size:1024" json:"remark" form:"remark"` // 备注
 	CreateTime int64  `json:"createTime" form:"createTime"`          // 举报时间
+}
+
+// StorageDeleteTask is an outbox row for irreversible object-storage cleanup.
+// The database graph is committed first; object deletion is attempted immediately
+// after commit and retried by the scheduler when a storage provider is temporarily
+// unavailable. Backend is either one of dto.UploadMethod string values or
+// "TangSengFile" for forum voice objects stored by TangSengDaoDaoServer.
+type StorageDeleteTask struct {
+	Model
+	Backend       string `gorm:"size:32;not null;uniqueIndex:uk_storage_delete_target,priority:1" json:"backend"`
+	ObjectKey     string `gorm:"size:700;not null;uniqueIndex:uk_storage_delete_target,priority:2" json:"objectKey"`
+	AttemptCount  int    `gorm:"not null;default:0" json:"attemptCount"`
+	NextRetryTime int64  `gorm:"not null;default:0;index:idx_storage_delete_due" json:"nextRetryTime"`
+	LastError     string `gorm:"type:text" json:"lastError"`
+	CreateTime    int64  `gorm:"not null;default:0" json:"createTime"`
+	UpdateTime    int64  `gorm:"not null;default:0" json:"updateTime"`
+}
+
+// SearchDeleteTask is a durable outbox for deleting topic/article search
+// documents after the database row has been permanently removed. Search
+// backends are external systems, so a transient outage must not leave a dead
+// result visible forever after the SQL transaction commits.
+type SearchDeleteTask struct {
+	Model
+	EntityType    string `gorm:"size:32;not null;uniqueIndex:uk_search_delete_entity,priority:1" json:"entityType"`
+	EntityId      int64  `gorm:"not null;uniqueIndex:uk_search_delete_entity,priority:2" json:"entityId"`
+	AttemptCount  int    `gorm:"not null;default:0" json:"attemptCount"`
+	NextRetryTime int64  `gorm:"not null;default:0;index:idx_search_delete_due" json:"nextRetryTime"`
+	LastError     string `gorm:"type:text" json:"lastError"`
+	CreateTime    int64  `gorm:"not null;default:0" json:"createTime"`
+	UpdateTime    int64  `gorm:"not null;default:0" json:"updateTime"`
 }
 
 // Attachment 帖子附件
