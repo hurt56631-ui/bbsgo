@@ -1218,6 +1218,7 @@ const enUS = {
       loginLink: "Sign in to post your comment",
       deleteConfirm: "Are you sure you want to delete this comment?",
       deleteSuccess: "Deleted successfully",
+      onlyOwner: "Original poster only",
       input: {
         replyTo: "Reply:",
         cancelReply: "Cancel reply",
@@ -1248,6 +1249,8 @@ const enUS = {
         delete: "Delete",
         report: "Report",
         loadMore: "Load more replies",
+        viewAll: "View all {count} replies",
+        collapse: "Collapse replies",
       },
     },
   },
