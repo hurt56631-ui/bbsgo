@@ -5,7 +5,7 @@ import { Image as ImageIcon, Plus, X } from "lucide-react"
 
 import { PreviewableImage } from "@/components/common/image-preview"
 import { Button } from "@/components/ui/button"
-import { apiFetch } from "@/lib/api/client"
+import { uploadCommunityImage } from "@/components/editor/upload"
 import type { ImageInfo } from "@/lib/api/types"
 import { useI18n } from "@/lib/i18n/provider"
 import { useToastActions } from "@/lib/toast"
@@ -14,12 +14,6 @@ import { cn } from "@/lib/utils"
 export type TextEditorRef = {
   focus: () => void
   reset: () => void
-}
-
-async function uploadImage(file: File) {
-  const body = new FormData()
-  body.append("image", file, file.name)
-  return apiFetch<{ url: string }>("/api/upload", { method: "POST", body })
 }
 
 const COMMENT_IMAGE_LIMIT = 9
@@ -124,7 +118,7 @@ export const TextEditor = React.forwardRef<
       try {
         const uploaded: ImageInfo[] = []
         for (const file of uploadImages) {
-          const result = await uploadImage(file)
+          const result = await uploadCommunityImage(file)
           uploaded.push({ url: result.url })
         }
         onImageListChange([...(imageList || []), ...uploaded])

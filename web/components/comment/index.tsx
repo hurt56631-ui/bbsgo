@@ -45,6 +45,7 @@ type ReplyValue = {
   imageList: ImageInfo[]
 }
 
+
 function imageSrc(image: ImageInfo) {
   return image.url || image.preview || ""
 }
@@ -225,17 +226,80 @@ function InlineReplyEditor({
   )
 }
 
+function compactReplyText(comment: Comment) {
+  if (!comment) return ""
+  const content = String(comment.content || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (content) return content
+  if (comment.imageList?.length) return "[图片]"
+  return "[回复]"
+}
+
+function CommentSubPreview({
+  data,
+  total,
+  onOpen,
+}: {
+  data: PageData<Comment>
+  total: number
+  onOpen: () => void
+}) {
+  const { t } = useI18n()
+  const preview = (data.results || []).slice(0, 3)
+  if (!preview.length && total <= 0) return null
+  return (
+    <button
+      type="button"
+      className="mt-2.5 block w-full rounded-md bg-muted/70 px-3 py-2 text-left hover:bg-muted"
+      onClick={onOpen}
+    >
+      {preview.length ? <div className="space-y-1.5">
+        {preview.map((reply) => (
+          <div key={reply.id} className="line-clamp-2 text-[13px] leading-5 text-muted-foreground">
+            <span className="font-medium text-foreground">
+              {reply.user.nickname || reply.user.username || reply.user.id}
+            </span>
+            {reply.quote?.user ? (
+              <>
+                <span className="mx-1">{t("component.comment.subList.replyTo")}</span>
+                <span className="font-medium text-foreground">
+                  {reply.quote.user.nickname || reply.quote.user.username || reply.quote.user.id}
+                </span>
+              </>
+            ) : null}
+            <span>：{compactReplyText(reply)}</span>
+          </div>
+        ))}
+      </div> : null}
+      <div className={cn(preview.length ? "mt-1.5" : "", "text-[13px] font-medium text-primary")}>
+        {t("component.comment.subList.viewAll", { count: Math.max(total, preview.length) })}
+      </div>
+    </button>
+  )
+}
+
+type CommentUpdater = Comment | ((current: Comment) => Comment)
+type ReplyPageUpdater =
+  | PageData<Comment>
+  | ((current: PageData<Comment>) => PageData<Comment>)
+
 function CommentSubList({
   commentId,
   data,
+  onDataChanged,
   onReply,
+  onReplyDeleted,
 }: {
   commentId: number
   data: PageData<Comment>
+  onDataChanged: (update: ReplyPageUpdater) => void
   onReply: (comment: Comment) => void
+  onReplyDeleted: (commentId: number) => void
 }) {
   const { t, currentUser, catchError, msgSignIn } = useCommentActions()
-  const [replies, setReplies] = React.useState(data)
+  const replies = data
   const [loadingMore, setLoadingMore] = React.useState(false)
   const [replyQuoteId, setReplyQuoteId] = React.useState(0)
   const [replyValue, setReplyValue] = React.useState<ReplyValue>({
@@ -255,10 +319,10 @@ function CommentSubList({
       const ret = await apiFetch<PageData<Comment>>("/api/comment/replies", {
         params: { commentId, cursor: replies.cursor || "" },
       })
-      setReplies((current) => ({
+      onDataChanged((current) => ({
         cursor: ret.cursor,
         hasMore: ret.hasMore,
-        results: [...(current.results || []), ...(ret.results || [])],
+        results: mergeUniqueReplies(current.results || [], ret.results || []),
       }))
     } catch (error) {
       catchError(error)
@@ -274,7 +338,7 @@ function CommentSubList({
           method: "POST",
           body: toFormData({ entityType: "comment", entityId: comment.id }),
         })
-        setReplies((current) => ({
+        onDataChanged((current) => ({
           ...current,
           results: current.results.map((item) =>
             item.id === comment.id
@@ -291,7 +355,7 @@ function CommentSubList({
           method: "POST",
           body: toFormData({ entityType: "comment", entityId: comment.id }),
         })
-        setReplies((current) => ({
+        onDataChanged((current) => ({
           ...current,
           results: current.results.map((item) =>
             item.id === comment.id
@@ -349,10 +413,7 @@ function CommentSubList({
       await apiFetch<null>(`/api/comment/delete/${comment.id}`, {
         method: "POST",
       })
-      setReplies((current) => ({
-        ...current,
-        results: current.results.filter((item) => item.id !== comment.id),
-      }))
+      onReplyDeleted(comment.id)
       toast.success(t("component.comment.deleteSuccess"))
     } catch (error) {
       catchError(error)
@@ -559,7 +620,7 @@ function CommentItem({
   allowAcceptAnswer: boolean
   entityType: EntityType
   entityId: EntityId
-  onChanged: (comment: Comment) => void
+  onChanged: (update: CommentUpdater) => void
   onDeleted: (comment: Comment) => void
 }) {
   const { t, currentUser, catchError, msgSignIn } = useCommentActions()
@@ -575,6 +636,12 @@ function CommentItem({
   const [confirmState, setConfirmState] =
     React.useState<ConfirmDialogState>(null)
   const isAccepted = acceptedCommentId === comment.id
+  const [showReplies, setShowReplies] = React.useState(false)
+  const replyPage: PageData<Comment> = comment.replies || {
+    cursor: "",
+    hasMore: (comment.commentCount || 0) > 0,
+    results: [],
+  }
 
   async function toggleLike() {
     try {
@@ -583,21 +650,21 @@ function CommentItem({
           method: "POST",
           body: toFormData({ entityType: "comment", entityId: comment.id }),
         })
-        onChanged({
-          ...comment,
+        onChanged((current) => ({
+          ...current,
           liked: false,
-          likeCount: Math.max(0, (comment.likeCount || 0) - 1),
-        })
+          likeCount: Math.max(0, (current.likeCount || 0) - 1),
+        }))
       } else {
         await apiFetch<null>("/api/like/like", {
           method: "POST",
           body: toFormData({ entityType: "comment", entityId: comment.id }),
         })
-        onChanged({
-          ...comment,
+        onChanged((current) => ({
+          ...current,
           liked: true,
-          likeCount: (comment.likeCount || 0) + 1,
-        })
+          likeCount: (current.likeCount || 0) + 1,
+        }))
       }
     } catch (error) {
       catchError(error)
@@ -632,7 +699,7 @@ function CommentItem({
       })
       setReplyCommentId(0)
       setReplyValue({ content: "", imageList: [] })
-      onChanged(appendReply(parent, ret))
+      onChanged((current) => appendReply(current, ret))
       toast.success(t("component.comment.list.publishSuccess"))
     } catch (error) {
       catchError(error)
@@ -821,13 +888,49 @@ function CommentItem({
               />
             </div>
           ) : null}
-          {comment.replies?.results?.length ? (
-            <CommentSubList
-              key={`${comment.id}-${comment.replies.results.length}-${comment.replies.cursor || ""}`}
-              commentId={comment.id}
-              data={comment.replies}
-              onReply={(reply) => onChanged(appendReply(comment, reply))}
-            />
+          {comment.replies?.results?.length || (comment.commentCount || 0) > 0 ? (
+            showReplies ? (
+              <div>
+                <CommentSubList
+                  key={comment.id}
+                  commentId={comment.id}
+                  data={replyPage}
+                  onDataChanged={(update) =>
+                    onChanged((current) => {
+                      const currentReplies = current.replies || {
+                        cursor: "",
+                        hasMore: (current.commentCount || 0) > 0,
+                        results: [],
+                      }
+                      const nextReplies =
+                        typeof update === "function"
+                          ? update(currentReplies)
+                          : update
+                      return { ...current, replies: nextReplies }
+                    })
+                  }
+                  onReply={(reply) =>
+                    onChanged((current) => appendReply(current, reply))
+                  }
+                  onReplyDeleted={(replyId) =>
+                    onChanged((current) => removeReply(current, replyId))
+                  }
+                />
+                <button
+                  type="button"
+                  className="mt-1 text-[13px] font-medium text-primary"
+                  onClick={() => setShowReplies(false)}
+                >
+                  {t("component.comment.subList.collapse")}
+                </button>
+              </div>
+            ) : (
+              <CommentSubPreview
+                data={replyPage}
+                total={comment.commentCount || replyPage.results.length}
+                onOpen={() => setShowReplies(true)}
+              />
+            )
           ) : null}
         </div>
       </div>
@@ -847,24 +950,66 @@ function CommentItem({
   )
 }
 
+function mergeUniqueComments(current: Comment[], incoming: Comment[]): Comment[] {
+  if (!incoming.length) return current
+  const ids = new Set(current.map((item) => item.id))
+  const merged = [...current]
+  for (const item of incoming) {
+    if (!ids.has(item.id)) {
+      ids.add(item.id)
+      merged.push(item)
+    }
+  }
+  return merged
+}
+
+function mergeUniqueReplies(current: Comment[], incoming: Comment[]): Comment[] {
+  return mergeUniqueComments(current, incoming).sort(
+    (left, right) => Number(left.id) - Number(right.id)
+  )
+}
+
 function appendReply(parent: Comment, reply: Comment): Comment {
   if (parent.replies?.results) {
+    if (parent.replies.results.some((item) => item.id === reply.id)) return parent
     return {
       ...parent,
+      commentCount: Math.max(0, Number(parent.commentCount || 0)) + 1,
       replies: {
         ...parent.replies,
-        results: [...parent.replies.results, reply],
+        // A live/local reply may arrive while older reply pages are still
+        // missing. Keep the visible nested thread ascending so loading the
+        // middle pages later cannot produce 1,2,3,100,4,5... ordering.
+        results: mergeUniqueReplies(parent.replies.results, [reply]),
       },
     }
   }
 
+  const previousCount = Math.max(0, Number(parent.commentCount || 0))
   return {
     ...parent,
+    commentCount: previousCount + 1,
     replies: {
-      cursor: "",
-      hasMore: false,
+      cursor: String(reply.id),
+      hasMore: previousCount > 0,
       results: [reply],
     },
+  }
+}
+
+function removeReply(parent: Comment, replyId: number): Comment {
+  const results = parent.replies?.results || []
+  const existed = results.some((item) => item.id === replyId)
+  if (!existed) return parent
+  return {
+    ...parent,
+    commentCount: Math.max(0, Number(parent.commentCount || 0) - 1),
+    replies: parent.replies
+      ? {
+          ...parent.replies,
+          results: results.filter((item) => item.id !== replyId),
+        }
+      : parent.replies,
   }
 }
 
@@ -877,6 +1022,7 @@ export function CommentSection({
   allowAcceptAnswer = false,
   initialData,
   onCreated,
+  ownerUserId,
 }: {
   entityType: EntityType
   entityId: EntityId
@@ -886,6 +1032,7 @@ export function CommentSection({
   allowAcceptAnswer?: boolean
   initialData?: PageData<Comment>
   onCreated?: (comment: Comment) => void
+  ownerUserId?: EntityId
 }) {
   const { t } = useI18n()
   const pathname = usePathname()
@@ -897,12 +1044,40 @@ export function CommentSection({
   const [loading, setLoading] = React.useState(false)
   const [currentAcceptedCommentId, setCurrentAcceptedCommentId] =
     React.useState(acceptedCommentId || 0)
+  const [onlyOwner, setOnlyOwner] = React.useState(false)
+  const [liveCommentCount, setLiveCommentCount] = React.useState(
+    Math.max(0, Number(commentCount || 0))
+  )
 
   React.useEffect(() => {
     if (initialData) {
       setPageData(initialData)
     }
   }, [initialData])
+
+  React.useEffect(() => {
+    setLiveCommentCount(Math.max(0, Number(commentCount || 0)))
+  }, [commentCount])
+
+  async function switchOnlyOwner(next: boolean) {
+    if (loading || entityType !== "topic") return
+    setLoading(true)
+    try {
+      const ret = await apiFetch<PageData<Comment>>("/api/comment/comments", {
+        params: {
+          entityType,
+          entityId,
+          cursor: "",
+          onlyOwner: next ? 1 : 0,
+        },
+      })
+      setOnlyOwner(next)
+      setPageData(ret)
+    } finally {
+      setLoading(false)
+    }
+  }
+
 
   const isNeedEmailVerify =
     Boolean(config?.createCommentEmailVerified) &&
@@ -920,12 +1095,13 @@ export function CommentSection({
           entityType,
           entityId,
           cursor: pageData.cursor || "",
+          onlyOwner: onlyOwner ? 1 : 0,
         },
       })
       setPageData((current) => ({
         cursor: ret.cursor,
         hasMore: ret.hasMore,
-        results: [...(current.results || []), ...(ret.results || [])],
+        results: mergeUniqueComments(current.results || [], ret.results || []),
       }))
     } finally {
       setLoading(false)
@@ -933,29 +1109,42 @@ export function CommentSection({
   }
 
   function onCommentCreated(comment: Comment) {
-    setPageData((current) => ({
-      ...current,
-      results: [comment, ...(current.results || [])],
-    }))
+    // "Only owner" is a server-side filter too. Do not inject a locally
+    // created non-owner comment into the filtered list until the filter is
+    // turned off, while still keeping the entity's total comment count fresh.
+    const belongsInCurrentFilter =
+      !onlyOwner ||
+      ownerUserId == null ||
+      String(comment.user.id) === String(ownerUserId)
+    if (belongsInCurrentFilter) {
+      setPageData((current) => {
+        const results = current.results || []
+        if (results.some((item) => item.id === comment.id)) return current
+        return { ...current, results: [comment, ...results] }
+      })
+    }
+    setLiveCommentCount((current) => current + 1)
     onCreated?.(comment)
   }
 
-  function updateComment(comment: Comment) {
-    if ((comment as Comment & { accepted?: boolean }).accepted === true) {
-      setCurrentAcceptedCommentId(comment.id)
-    } else if (
-      (comment as Comment & { accepted?: boolean }).accepted === false
-    ) {
-      setCurrentAcceptedCommentId(0)
+  function updateComment(commentId: number, update: CommentUpdater) {
+    if (typeof update !== "function") {
+      if ((update as Comment & { accepted?: boolean }).accepted === true) {
+        setCurrentAcceptedCommentId(update.id)
+      } else if (
+        (update as Comment & { accepted?: boolean }).accepted === false
+      ) {
+        setCurrentAcceptedCommentId(0)
+      }
     }
 
     setPageData((current) => ({
       ...current,
-      results: current.results.map((item) =>
-        item.id === comment.id
-          ? ({ ...comment, accepted: undefined } as Comment)
-          : item
-      ),
+      results: current.results.map((item) => {
+        if (item.id !== commentId) return item
+        const next = typeof update === "function" ? update(item) : update
+        return { ...next, accepted: undefined } as Comment
+      }),
     }))
   }
 
@@ -967,14 +1156,32 @@ export function CommentSection({
       ...current,
       results: current.results.filter((item) => item.id !== comment.id),
     }))
+    setLiveCommentCount((current) => Math.max(0, current - 1))
   }
 
   return (
     <section id="JComment" className="rounded-lg bg-background p-4">
-      <div className="flex text-base font-medium text-foreground">
-        <span>{title || t("component.comment.title")}</span>
-        {commentCount && commentCount > 0 ? (
-          <span>&nbsp;{commentCount}</span>
+      <div className="flex items-center justify-between gap-3 text-base font-medium text-foreground">
+        <div>
+          <span>{title || t("component.comment.title")}</span>
+          {liveCommentCount > 0 ? (
+            <span>&nbsp;{liveCommentCount}</span>
+          ) : null}
+        </div>
+        {entityType === "topic" && ownerUserId != null ? (
+          <button
+            type="button"
+            className={cn(
+              "rounded-full px-3 py-1 text-xs transition-colors",
+              onlyOwner
+                ? "bg-primary/10 font-medium text-primary"
+                : "bg-muted text-muted-foreground hover:text-foreground"
+            )}
+            disabled={loading}
+            onClick={() => void switchOnlyOwner(!onlyOwner)}
+          >
+            {t("component.comment.onlyOwner")}
+          </button>
         ) : null}
       </div>
 
@@ -1025,7 +1232,7 @@ export function CommentSection({
               allowAcceptAnswer={allowAcceptAnswer}
               entityType={entityType}
               entityId={entityId}
-              onChanged={updateComment}
+              onChanged={(update) => updateComment(comment.id, update)}
               onDeleted={deleteComment}
             />
           ))
