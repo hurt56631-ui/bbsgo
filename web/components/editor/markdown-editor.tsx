@@ -59,7 +59,10 @@ export function MarkdownEditor({
   const { locale } = useI18n()
 
   async function uploadImg(files: File[], callback: (urls: string[]) => void) {
-    const urls = await Promise.all(files.map((file) => uploadEditorImage(file)))
+    const urls: string[] = []
+    for (const file of files) {
+      urls.push(await uploadEditorImage(file))
+    }
     callback(urls)
   }
 

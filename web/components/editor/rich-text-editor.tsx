@@ -1005,7 +1005,10 @@ export function RichTextEditor({
   async function uploadImages(files: File[]) {
     setUploading(true)
     try {
-      const urls = await Promise.all(files.map((file) => uploadEditorImage(file)))
+      const urls: string[] = []
+      for (const file of files) {
+        urls.push(await uploadEditorImage(file))
+      }
       urls.forEach((url, index) => {
         editor?.chain().focus().setResizableImage({ src: url, alt: files[index]?.name || "", title: files[index]?.name || "" }).run()
       })
