@@ -29,8 +29,9 @@ func handleTopicCreateEvent(i interface{}) {
 		e.UserId, e.TopicId, constants.EntityTopic, e.CreateTime,
 	)
 	if err != nil {
+		// Realtime list hints are independent from the durable follower feed. Log
+		// fan-out failures but still allow active viewers to refresh from REST.
 		slog.Error("fan-out topic feed failed", slog.Int64("topicId", e.TopicId), slog.Any("err", err))
-		return
 	}
 
 	// The event worker is asynchronous. A permanent delete can commit after the
@@ -43,5 +44,7 @@ func handleTopicCreateEvent(i interface{}) {
 			Delete(&models.UserFeed{}).Error; cleanupErr != nil {
 			slog.Error("cleanup late topic feed failed", slog.Int64("topicId", e.TopicId), slog.Any("err", cleanupErr))
 		}
+		return
 	}
+	services.ForumRealtimeService.PushTopicCreated(topic)
 }
