@@ -182,36 +182,48 @@ type TopicTocItem struct {
 }
 
 // 帖子列表返回实体
+type TopicReadProgressResponse struct {
+	TopicId          string `json:"topicId"`
+	LastCommentId    int64  `json:"lastCommentId"`
+	ReadCommentCount int64  `json:"readCommentCount"`
+	AnchorCommentId  int64  `json:"anchorCommentId"`
+	AnchorOffsetDp   int    `json:"anchorOffsetDp"`
+	ScrollProgress   int    `json:"scrollProgress"`
+	ScrollPercent    int    `json:"scrollPercent"`
+	LastReadTime     int64  `json:"lastReadTime"`
+}
+
 type TopicResponse struct {
-	Id                string               `json:"id"`
-	Type              constants.TopicType  `json:"type"`
-	QaStatus          constants.QaStatus   `json:"qaStatus"`
-	AcceptedCommentId int64                `json:"acceptedCommentId"`
-	SolvedAt          int64                `json:"solvedAt"`
-	BountyScore       int                  `json:"bountyScore"`
-	User              *UserInfo            `json:"user"`
-	Category          *CategoryResponse    `json:"category"`
-	Tags              *[]TagResponse       `json:"tags"`
-	Title             string               `json:"title"`
-	Summary           string               `json:"summary"`
-	Content           string               `json:"content"`
-	Toc               []TopicTocItem       `json:"toc,omitempty"`
-	ImageList         []ImageInfo          `json:"imageList"`
-	LastCommentTime   int64                `json:"lastCommentTime"`
-	ViewCount         int64                `json:"viewCount"`
-	CommentCount      int64                `json:"commentCount"`
-	LikeCount         int64                `json:"likeCount"`
-	Liked             bool                 `json:"liked"`
-	CreateTime        int64                `json:"createTime"`
-	Recommend         bool                 `json:"recommend"`
-	RecommendTime     int64                `json:"recommendTime"`
-	Sticky            bool                 `json:"sticky"`
-	StickyTime        int64                `json:"stickyTime"`
-	Status            int                  `json:"status"`
-	Favorited         bool                 `json:"favorited"`
-	IpLocation        string               `json:"ipLocation"`
-	Vote              *VoteResponse        `json:"vote"`
-	Attachments       []AttachmentResponse `json:"attachments,omitempty"`
+	Id                string                     `json:"id"`
+	Type              constants.TopicType        `json:"type"`
+	QaStatus          constants.QaStatus         `json:"qaStatus"`
+	AcceptedCommentId int64                      `json:"acceptedCommentId"`
+	SolvedAt          int64                      `json:"solvedAt"`
+	BountyScore       int                        `json:"bountyScore"`
+	User              *UserInfo                  `json:"user"`
+	Category          *CategoryResponse          `json:"category"`
+	Tags              *[]TagResponse             `json:"tags"`
+	Title             string                     `json:"title"`
+	Summary           string                     `json:"summary"`
+	Content           string                     `json:"content"`
+	Toc               []TopicTocItem             `json:"toc,omitempty"`
+	ImageList         []ImageInfo                `json:"imageList"`
+	LastCommentTime   int64                      `json:"lastCommentTime"`
+	ViewCount         int64                      `json:"viewCount"`
+	CommentCount      int64                      `json:"commentCount"`
+	LikeCount         int64                      `json:"likeCount"`
+	Liked             bool                       `json:"liked"`
+	CreateTime        int64                      `json:"createTime"`
+	Recommend         bool                       `json:"recommend"`
+	RecommendTime     int64                      `json:"recommendTime"`
+	Sticky            bool                       `json:"sticky"`
+	StickyTime        int64                      `json:"stickyTime"`
+	Status            int                        `json:"status"`
+	Favorited         bool                       `json:"favorited"`
+	IpLocation        string                     `json:"ipLocation"`
+	Vote              *VoteResponse              `json:"vote"`
+	Attachments       []AttachmentResponse       `json:"attachments,omitempty"`
+	ReadProgress      *TopicReadProgressResponse `json:"readProgress,omitempty"`
 }
 
 // AttachmentResponse 附件返回（不包含直链）
