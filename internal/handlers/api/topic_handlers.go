@@ -524,3 +524,110 @@ func TopicHideContent(ctx *gin.Context) {
 	})
 
 }
+func TopicFeedWatch(ctx *gin.Context) {
+	var body struct {
+		WatchID string `json:"watchId" form:"watchId"`
+		Active  bool   `json:"active" form:"active"`
+	}
+	if err := ginx.Bind(ctx, &body); err != nil {
+		ginx.WriteJSON(ctx, err)
+		return
+	}
+	user := common.GetCurrentUser(ctx)
+	if user == nil || user.AuthSource != services.TalkamiAuthSource || !user.ExternalUID.Valid {
+		// Web-only/anonymous accounts do not have a WuKongIM uid. The endpoint is
+		// intentionally a no-op so the same native screen can degrade to REST.
+		ginx.WriteJSON(ctx, true)
+		return
+	}
+	uid := strings.TrimSpace(user.ExternalUID.String)
+	if uid != "" {
+		services.ForumRealtimeService.WatchFeed(uid, body.WatchID, body.Active)
+	}
+	ginx.WriteJSON(ctx, true)
+}
+
+func TopicReadProgressGet(ctx *gin.Context) {
+	user := common.GetCurrentUser(ctx)
+	if user == nil {
+		ginx.WriteJSON(ctx, errs.NotLogin())
+		return
+	}
+	topicIDStr := strings.TrimSpace(ctx.Query("topicId"))
+	topicID := idcodec.Decode(topicIDStr)
+	if topicID <= 0 {
+		ginx.WriteJSON(ctx, ginx.ErrorMessage(locales.Get("comment.invalid_params")))
+		return
+	}
+	progress := services.TopicReadProgressService.Get(user.Id, topicID)
+	if progress == nil {
+		ginx.WriteJSON(ctx, resp.TopicReadProgressResponse{TopicId: idcodec.Encode(topicID)})
+		return
+	}
+	ginx.WriteJSON(ctx, resp.TopicReadProgressResponse{
+		TopicId:          idcodec.Encode(topicID),
+		LastCommentId:    progress.LastCommentId,
+		ReadCommentCount: progress.ReadCommentCount,
+		AnchorCommentId:  progress.AnchorCommentId,
+		AnchorOffsetDp:   progress.AnchorOffsetDp,
+		ScrollProgress:   progress.ScrollProgress,
+		ScrollPercent:    progress.ScrollPercent,
+		LastReadTime:     progress.LastReadTime,
+	})
+}
+
+func TopicReadProgressSave(ctx *gin.Context) {
+	user := common.GetCurrentUser(ctx)
+	if user == nil {
+		ginx.WriteJSON(ctx, errs.NotLogin())
+		return
+	}
+	var body struct {
+		TopicID         string `json:"topicId" form:"topicId"`
+		LastCommentID   int64  `json:"lastCommentId" form:"lastCommentId"`
+		AnchorCommentID *int64 `json:"anchorCommentId" form:"anchorCommentId"`
+		AnchorOffsetDp  *int   `json:"anchorOffsetDp" form:"anchorOffsetDp"`
+		ScrollProgress  *int   `json:"scrollProgress" form:"scrollProgress"`
+		ScrollPercent   int    `json:"scrollPercent" form:"scrollPercent"`
+	}
+	if err := ginx.Bind(ctx, &body); err != nil {
+		ginx.WriteJSON(ctx, err)
+		return
+	}
+	topicID := idcodec.Decode(strings.TrimSpace(body.TopicID))
+	if topicID <= 0 {
+		ginx.WriteJSON(ctx, ginx.ErrorMessage(locales.Get("comment.invalid_params")))
+		return
+	}
+	anchorCommentID := int64(0)
+	anchorOffsetDp := 0
+	scrollProgress := 0
+	hasResumeFields := body.AnchorCommentID != nil || body.AnchorOffsetDp != nil || body.ScrollProgress != nil
+	if body.AnchorCommentID != nil {
+		anchorCommentID = *body.AnchorCommentID
+	}
+	if body.AnchorOffsetDp != nil {
+		anchorOffsetDp = *body.AnchorOffsetDp
+	}
+	if body.ScrollProgress != nil {
+		scrollProgress = *body.ScrollProgress
+	}
+	progress, err := services.TopicReadProgressService.Save(
+		user.Id, topicID, body.LastCommentID, anchorCommentID,
+		anchorOffsetDp, scrollProgress, body.ScrollPercent, hasResumeFields,
+	)
+	if err != nil {
+		ginx.WriteJSON(ctx, err)
+		return
+	}
+	ginx.WriteJSON(ctx, resp.TopicReadProgressResponse{
+		TopicId:          idcodec.Encode(topicID),
+		LastCommentId:    progress.LastCommentId,
+		ReadCommentCount: progress.ReadCommentCount,
+		AnchorCommentId:  progress.AnchorCommentId,
+		AnchorOffsetDp:   progress.AnchorOffsetDp,
+		ScrollProgress:   progress.ScrollProgress,
+		ScrollPercent:    progress.ScrollPercent,
+		LastReadTime:     progress.LastReadTime,
+	})
+}
