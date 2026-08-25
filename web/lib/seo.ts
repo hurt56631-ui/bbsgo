@@ -20,6 +20,9 @@ type ContentMetaInput = {
   description?: string
   keywords?: string[]
   image?: string
+  imageWidth?: number
+  imageHeight?: number
+  imageType?: string
   canonicalPath?: string
   structuredData?: Record<string, unknown>
   ogType?: "article" | "profile" | "website"
@@ -207,6 +210,9 @@ export function contentMeta(
       description,
       url: canonical,
       image,
+      imageWidth: content.imageWidth,
+      imageHeight: content.imageHeight,
+      imageType: content.imageType,
       type: content.ogType || "website",
     }),
     content.structuredData
@@ -223,6 +229,9 @@ export function pageMeta(
     description?: string
     keywords?: string[]
     image?: string
+    imageWidth?: number
+    imageHeight?: number
+    imageType?: string
     canonicalPath?: string
     structuredData?: Record<string, unknown>
     ogType?: "article" | "profile" | "website"
@@ -234,6 +243,9 @@ export function pageMeta(
     description: options.description,
     keywords: options.keywords,
     image: options.image,
+    imageWidth: options.imageWidth,
+    imageHeight: options.imageHeight,
+    imageType: options.imageType,
     canonicalPath: options.canonicalPath,
     structuredData: options.structuredData,
     ogType: options.ogType,
@@ -412,6 +424,9 @@ function socialMeta({
   description,
   url,
   image,
+  imageWidth,
+  imageHeight,
+  imageType,
   type,
 }: {
   config: SiteConfig | null | undefined
@@ -419,6 +434,9 @@ function socialMeta({
   description?: string
   url?: string
   image?: string
+  imageWidth?: number
+  imageHeight?: number
+  imageType?: string
   type: "article" | "profile" | "website"
 }): MetaDescriptor[] {
   return compactMeta([
@@ -430,6 +448,18 @@ function socialMeta({
     { property: "og:site_name", content: siteName(config) },
     url ? { property: "og:url", content: url } : undefined,
     image ? { property: "og:image", content: image } : undefined,
+    image && image.startsWith("https://")
+      ? { property: "og:image:secure_url", content: image }
+      : undefined,
+    image && imageType
+      ? { property: "og:image:type", content: imageType }
+      : undefined,
+    image && imageWidth
+      ? { property: "og:image:width", content: String(imageWidth) }
+      : undefined,
+    image && imageHeight
+      ? { property: "og:image:height", content: String(imageHeight) }
+      : undefined,
     { name: "twitter:card", content: image ? "summary_large_image" : "summary" },
     title ? { name: "twitter:title", content: title } : undefined,
     description
