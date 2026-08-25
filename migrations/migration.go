@@ -125,4 +125,6 @@ func init() {
 	register(24, "storage delete outbox index compatibility", migrate_storage_delete_outbox_v2)
 	register(25, "physical delete hot-path indexes", migrate_delete_hot_path_indexes)
 	register(26, "durable search delete outbox", migrate_search_delete_outbox)
+	register(27, "persist per-user topic read progress", migrate_topic_read_progress)
+	register(28, "upgrade topic read progress resume anchors", migrate_topic_read_progress_v2)
 }
