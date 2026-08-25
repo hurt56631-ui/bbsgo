@@ -55,6 +55,9 @@ func hardDeleteTopicGraph(ctx *sqls.TxContext, topic *models.Topic) error {
 		Delete(&models.UserFeed{}).Error; err != nil {
 		return err
 	}
+	if err := tx.Where("topic_id = ?", topic.Id).Delete(&models.TopicReadProgress{}).Error; err != nil {
+		return err
+	}
 
 	if err := forEachInt64Batch(commentIds, 500, func(batch []int64) error {
 		if err := tx.Where("entity_type = ? AND entity_id IN ?", constants.EntityComment, batch).
