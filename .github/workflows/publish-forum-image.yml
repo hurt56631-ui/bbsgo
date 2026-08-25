@@ -3,6 +3,7 @@ name: Build Forum Image
 on:
   push:
     branches:
+      - main
       - master
       - talkami-main
   workflow_dispatch:
