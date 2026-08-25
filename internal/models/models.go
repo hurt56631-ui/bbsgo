@@ -10,7 +10,7 @@ var Models = []interface{}{
 	&Migration{},
 	&UserRole{}, &Role{}, &Permission{}, &RolePermission{}, &DictType{}, &Dict{},
 
-	&User{}, &UserToken{}, &TalkamiTokenNonce{}, &ThirdUser{}, &Tag{}, &Article{}, &ArticleTag{}, &Comment{}, &Favorite{}, &Topic{}, &Category{},
+	&User{}, &UserToken{}, &TalkamiTokenNonce{}, &ThirdUser{}, &Tag{}, &Article{}, &ArticleTag{}, &Comment{}, &Favorite{}, &Topic{}, &TopicReadProgress{}, &Category{},
 	&TopicTag{}, &UserLike{}, &Message{}, &SysConfig{}, &Link{},
 	&TaskConfig{}, &UserTaskEvent{}, &UserTaskLog{},
 	&Badge{}, &UserBadge{},
@@ -276,6 +276,30 @@ type Topic struct {
 	IpLocation        string                `gorm:"size:64" json:"ipLocation" form:"ipLocation"`                                                                                                   // IP属地
 	CreateTime        int64                 `gorm:"index:idx_topic_create_time" json:"createTime" form:"createTime"`                                                                               // 创建时间
 	ExtraData         string                `gorm:"type:text" json:"extraData" form:"extraData"`                                                                                                   // 扩展数据
+}
+
+// TopicReadProgress persists one user's canonical reading position for a topic.
+// LastCommentId points at the last visible top-level comment in ascending order;
+// ReadCommentCount is recalculated by the server so clients cannot forge unread state.
+type TopicReadProgress struct {
+	Model
+	UserId           int64 `gorm:"not null;uniqueIndex:uk_topic_read_progress_user_topic;index:idx_topic_read_progress_user_time,priority:1" json:"userId" form:"userId"`
+	TopicId          int64 `gorm:"not null;uniqueIndex:uk_topic_read_progress_user_topic;index:idx_topic_read_progress_topic" json:"topicId" form:"topicId"`
+	LastCommentId    int64 `gorm:"not null;default:0" json:"lastCommentId" form:"lastCommentId"`
+	ReadCommentCount int64 `gorm:"not null;default:0" json:"readCommentCount" form:"readCommentCount"`
+	// AnchorCommentId/AnchorOffsetDp are the last visible resume anchor. They may
+	// move backwards when the user intentionally rereads older content, while
+	// LastCommentId remains the monotonic furthest-read marker used for unread state.
+	AnchorCommentId int64 `gorm:"not null;default:0" json:"anchorCommentId" form:"anchorCommentId"`
+	AnchorOffsetDp  int   `gorm:"not null;default:0" json:"anchorOffsetDp" form:"anchorOffsetDp"`
+	// ScrollProgress is basis points (0..10000), giving 0.01% precision for long
+	// topic bodies where no comment row is visible. ScrollPercent is retained for
+	// older clients and compatibility.
+	ScrollProgress int   `gorm:"not null;default:0" json:"scrollProgress" form:"scrollProgress"`
+	ScrollPercent  int   `gorm:"not null;default:0" json:"scrollPercent" form:"scrollPercent"`
+	LastReadTime   int64 `gorm:"not null;default:0;index:idx_topic_read_progress_user_time,priority:2" json:"lastReadTime" form:"lastReadTime"`
+	CreateTime     int64 `gorm:"not null;default:0" json:"createTime" form:"createTime"`
+	UpdateTime     int64 `gorm:"not null;default:0" json:"updateTime" form:"updateTime"`
 }
 
 // Vote 投票
