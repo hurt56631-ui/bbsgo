@@ -13,7 +13,10 @@ export function meta({
   return pageMeta(rootData?.config, "实用中文短句", {
     description: "学习日常实用中文短句，配合拼音和发音练习常用口语表达。",
     keywords: ["中文短句", "日常口语", "普通话", "拼音", "中文学习"],
-    image: "/images/learning-home-hero.webp",
+    image: "/images/learning-share.jpg",
+    imageWidth: 1200,
+    imageHeight: 630,
+    imageType: "image/jpeg",
     canonicalPath: location.pathname,
   })
 }

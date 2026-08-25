@@ -13,7 +13,10 @@ export function meta({
   return pageMeta(rootData?.config, "汉语拼音", {
     description: "学习普通话拼音声母、韵母、整体认读和声调，支持点击发音与语速切换。",
     keywords: ["汉语拼音", "拼音", "普通话", "声母", "韵母", "声调"],
-    image: "/images/learning-home-hero.webp",
+    image: "/images/learning-share.jpg",
+    imageWidth: 1200,
+    imageHeight: 630,
+    imageType: "image/jpeg",
     canonicalPath: location.pathname,
   })
 }

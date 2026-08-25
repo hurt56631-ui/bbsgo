@@ -13,7 +13,10 @@ export function meta({
   return pageMeta(rootData?.config, "中文单词", {
     description: "学习高频中文单词，配合拼音、发音和分级内容掌握常用词汇。",
     keywords: ["中文单词", "汉语词汇", "普通话", "拼音", "中文学习"],
-    image: "/images/learning-home-hero.webp",
+    image: "/images/learning-share.jpg",
+    imageWidth: 1200,
+    imageHeight: 630,
+    imageType: "image/jpeg",
     canonicalPath: location.pathname,
   })
 }
