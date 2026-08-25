@@ -24,6 +24,18 @@ func BuildTopic(ctx *gin.Context, topic *models.Topic) *resp.TopicResponse {
 	if currentUser := common.GetCurrentUser(ctx); currentUser != nil {
 		rsp.Liked = services.UserLikeService.Exists(currentUser.Id, constants.EntityTopic, topic.Id)
 		rsp.Favorited = services.FavoriteService.IsFavorited(currentUser.Id, constants.EntityTopic, topic.Id)
+		if progress := services.TopicReadProgressService.Get(currentUser.Id, topic.Id); progress != nil {
+			rsp.ReadProgress = &resp.TopicReadProgressResponse{
+				TopicId:          idcodec.Encode(topic.Id),
+				LastCommentId:    progress.LastCommentId,
+				ReadCommentCount: progress.ReadCommentCount,
+				AnchorCommentId:  progress.AnchorCommentId,
+				AnchorOffsetDp:   progress.AnchorOffsetDp,
+				ScrollProgress:   progress.ScrollProgress,
+				ScrollPercent:    progress.ScrollPercent,
+				LastReadTime:     progress.LastReadTime,
+			}
+		}
 	}
 
 	if vote := services.VoteService.Get(topic.VoteId); vote != nil {
