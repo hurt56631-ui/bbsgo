@@ -1,15 +1,5 @@
 import type { PinyinItem, PinyinSection } from "./types"
 
-function unicodeFileName(value: string) {
-  return Array.from(value)
-    .map((character) => {
-      const codePoint = character.codePointAt(0)
-      if (codePoint === undefined || codePoint < 128) return character
-      return `#U${codePoint.toString(16).padStart(4, "0")}`
-    })
-    .join("")
-}
-
 function plainItems(
   values: readonly string[],
   folder: "initials" | "syllables"
@@ -28,7 +18,7 @@ function unicodeItems(
   return values.map((label) => ({
     id: label,
     label,
-    audio: `/audio/pinyin/${folder}/${unicodeFileName(label)}.mp3`,
+    audio: `/audio/pinyin/${folder}/${encodeURIComponent(label)}.mp3`,
   }))
 }
 
