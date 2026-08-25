@@ -45,6 +45,7 @@ type ReplyValue = {
   imageList: ImageInfo[]
 }
 
+const COMMENT_LIVE_REFRESH_INTERVAL_MS = 3000
 
 function imageSrc(image: ImageInfo) {
   return image.url || image.preview || ""
@@ -969,6 +970,56 @@ function mergeUniqueReplies(current: Comment[], incoming: Comment[]): Comment[] 
   )
 }
 
+function mergeLiveComment(current: Comment, incoming: Comment): Comment {
+  if (!current.replies && !incoming.replies) {
+    return { ...current, ...incoming }
+  }
+
+  const mergedReplies = mergeUniqueReplies(
+    current.replies?.results || [],
+    incoming.replies?.results || []
+  )
+  const replyCount = Math.max(
+    0,
+    Number(incoming.commentCount ?? current.commentCount ?? mergedReplies.length)
+  )
+
+  return {
+    ...current,
+    ...incoming,
+    replies: {
+      cursor: mergedReplies.length
+        ? String(mergedReplies[mergedReplies.length - 1].id)
+        : incoming.replies?.cursor || current.replies?.cursor || "",
+      hasMore: replyCount > mergedReplies.length,
+      results: mergedReplies,
+    },
+  }
+}
+
+function mergeLiveCommentPage(
+  current: Comment[],
+  incoming: Comment[]
+): Comment[] {
+  if (!incoming.length) return current
+
+  const currentById = new Map(current.map((item) => [item.id, item]))
+  const incomingIds = new Set(incoming.map((item) => item.id))
+  const merged = incoming.map((item) => {
+    const existing = currentById.get(item.id)
+    return existing ? mergeLiveComment(existing, item) : item
+  })
+
+  // The realtime refresh only asks for the newest first page. Preserve older
+  // pages that the reader has already loaded below it.
+  for (const item of current) {
+    if (!incomingIds.has(item.id)) {
+      merged.push(item)
+    }
+  }
+  return merged
+}
+
 function appendReply(parent: Comment, reply: Comment): Comment {
   if (parent.replies?.results) {
     if (parent.replies.results.some((item) => item.id === reply.id)) return parent
@@ -1048,6 +1099,8 @@ export function CommentSection({
   const [liveCommentCount, setLiveCommentCount] = React.useState(
     Math.max(0, Number(commentCount || 0))
   )
+  const pageDataRef = React.useRef(pageData)
+  const liveRefreshInFlightRef = React.useRef(false)
 
   React.useEffect(() => {
     if (initialData) {
@@ -1058,6 +1111,78 @@ export function CommentSection({
   React.useEffect(() => {
     setLiveCommentCount(Math.max(0, Number(commentCount || 0)))
   }, [commentCount])
+
+  React.useEffect(() => {
+    pageDataRef.current = pageData
+  }, [pageData])
+
+  const refreshLiveComments = React.useCallback(async () => {
+    if (
+      (entityType !== "topic" && entityType !== "article") ||
+      liveRefreshInFlightRef.current ||
+      (typeof document !== "undefined" &&
+        document.visibilityState !== "visible")
+    ) {
+      return
+    }
+
+    liveRefreshInFlightRef.current = true
+    try {
+      const ret = await apiFetch<PageData<Comment>>("/api/comment/comments", {
+        params: {
+          entityType,
+          entityId,
+          cursor: "",
+          onlyOwner: onlyOwner ? 1 : 0,
+        },
+      })
+      const snapshot = pageDataRef.current
+      const knownIds = new Set((snapshot.results || []).map((item) => item.id))
+      const addedRootComments = (ret.results || []).reduce(
+        (count, item) => count + (knownIds.has(item.id) ? 0 : 1),
+        0
+      )
+
+      setPageData((current) => ({
+        ...current,
+        results: mergeLiveCommentPage(
+          current.results || [],
+          ret.results || []
+        ),
+      }))
+      if (addedRootComments > 0) {
+        setLiveCommentCount((current) => current + addedRootComments)
+      }
+    } catch {
+      // Realtime refresh is best-effort. Normal loading, posting and manual
+      // navigation must keep working even during a brief network interruption.
+    } finally {
+      liveRefreshInFlightRef.current = false
+    }
+  }, [entityId, entityType, onlyOwner])
+
+  React.useEffect(() => {
+    if (entityType !== "topic" && entityType !== "article") return
+
+    const timer = window.setInterval(
+      () => void refreshLiveComments(),
+      COMMENT_LIVE_REFRESH_INTERVAL_MS
+    )
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refreshLiveComments()
+      }
+    }
+    const refreshOnFocus = () => void refreshLiveComments()
+
+    document.addEventListener("visibilitychange", refreshWhenVisible)
+    window.addEventListener("focus", refreshOnFocus)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", refreshWhenVisible)
+      window.removeEventListener("focus", refreshOnFocus)
+    }
+  }, [entityType, refreshLiveComments])
 
   async function switchOnlyOwner(next: boolean) {
     if (loading || entityType !== "topic") return
