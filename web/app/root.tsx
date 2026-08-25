@@ -89,6 +89,33 @@ const GoogleOneTap = React.lazy(() =>
   }))
 )
 
+function hasAbsoluteSiteBaseURL(value: string | null | undefined) {
+  if (!value || value === "/") return false
+
+  try {
+    const url = new URL(value)
+    return (url.protocol === "http:" || url.protocol === "https:") && Boolean(url.host)
+  } catch {
+    return false
+  }
+}
+
+function requestPublicOrigin(request: Request) {
+  const requestURL = new URL(request.url)
+  const forwardedProto = request.headers
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim()
+  const forwardedHost = request.headers
+    .get("x-forwarded-host")
+    ?.split(",")[0]
+    ?.trim()
+  const host = forwardedHost || request.headers.get("host") || requestURL.host
+  const protocol = forwardedProto || requestURL.protocol.replace(":", "")
+
+  return `${protocol}://${host}`
+}
+
 async function loadRootData(request: Request): Promise<RootLoaderData> {
   const requestOptions = { request } as NonNullable<
     Parameters<typeof apiFetch>[1]
@@ -103,11 +130,15 @@ async function loadRootData(request: Request): Promise<RootLoaderData> {
     configRequest,
     currentUserRequest,
   ])
+  const resolvedConfig =
+    config && !hasAbsoluteSiteBaseURL(config.baseURL)
+      ? { ...config, baseURL: requestPublicOrigin(request) }
+      : config
 
   return {
-    config,
+    config: resolvedConfig,
     currentUser,
-    locale: normalizeLocale(config?.language),
+    locale: normalizeLocale(resolvedConfig?.language),
     unreadMessageCount: 0,
   }
 }
