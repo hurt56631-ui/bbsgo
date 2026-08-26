@@ -890,6 +890,7 @@ function CommentItem({
   return (
     <>
       <div
+        data-topic-comment-id={entityType === "topic" ? comment.id : undefined}
         className={cn(
           "flex py-2.5",
           isAccepted
@@ -1201,6 +1202,7 @@ export function CommentSection({
   initialData,
   onCreated,
   ownerUserId,
+  restoreAnchorCommentId = 0,
 }: {
   entityType: EntityType
   entityId: EntityId
@@ -1211,6 +1213,7 @@ export function CommentSection({
   initialData?: PageData<Comment>
   onCreated?: (comment: Comment) => void
   ownerUserId?: EntityId
+  restoreAnchorCommentId?: number
 }) {
   const { t } = useI18n()
   const pathname = usePathname()
@@ -1228,6 +1231,8 @@ export function CommentSection({
   )
   const pageDataRef = React.useRef(pageData)
   const liveRefreshInFlightRef = React.useRef(false)
+  const restoreLoadAttemptsRef = React.useRef(0)
+  const restoreTargetRef = React.useRef(0)
 
   React.useEffect(() => {
     if (initialData) {
@@ -1242,6 +1247,45 @@ export function CommentSection({
   React.useEffect(() => {
     pageDataRef.current = pageData
   }, [pageData])
+
+  React.useEffect(() => {
+    const nextTarget = Math.max(0, Number(restoreAnchorCommentId || 0))
+    if (restoreTargetRef.current !== nextTarget) {
+      restoreTargetRef.current = nextTarget
+      restoreLoadAttemptsRef.current = 0
+    }
+  }, [restoreAnchorCommentId])
+
+  React.useEffect(() => {
+    const target = restoreTargetRef.current
+    if (
+      entityType !== "topic" ||
+      target <= 0 ||
+      onlyOwner ||
+      loading ||
+      !pageData.hasMore ||
+      pageData.results.some((item) => item.id === target) ||
+      restoreLoadAttemptsRef.current >= 30
+    ) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      if (restoreTargetRef.current !== target) return
+      restoreLoadAttemptsRef.current += 1
+      void loadMore()
+    }, 40)
+
+    return () => window.clearTimeout(timer)
+  }, [
+    entityType,
+    loading,
+    onlyOwner,
+    pageData.cursor,
+    pageData.hasMore,
+    pageData.results,
+    restoreAnchorCommentId,
+  ])
 
   const refreshLiveComments = React.useCallback(async () => {
     if (
