@@ -46,7 +46,7 @@ ENV NODE_ENV=production \
 	BBSGO_SERVER_URL=http://127.0.0.1:8082 \
 	TZ=Asia/Shanghai
 
-RUN apk add --no-cache ca-certificates tzdata wget \
+RUN apk add --no-cache ca-certificates tzdata wget ffmpeg \
 	&& mkdir -p /app/data /app/logs /app/res/uploads /app/defaults
 
 COPY --from=server-builder /out/bbs-go /app/bbs-go

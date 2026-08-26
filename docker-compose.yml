@@ -47,7 +47,10 @@ services:
       BBSGO_WUKONGIM_API_URL: ${BBSGO_WUKONGIM_API_URL:-}
       # Forum voice files are uploaded by TangSengDaoDao. bbs-go uses this
       # internal API plus the shared forum HMAC secret to physically delete them.
-      BBSGO_TANGSENG_API_URL: ${BBSGO_TANGSENG_API_URL:-}
+      # Legacy Android comments store relative file/preview/common/forum/...
+      # voice paths. This project's TangSeng public API is api.886.best; keep it
+      # overridable for other deployments. New app messages store absolute URLs.
+      BBSGO_TANGSENG_API_URL: ${BBSGO_TANGSENG_API_URL:-https://api.886.best}
       BBSGO_TALKAMI_HMAC_SECRET: ${BBSGO_TALKAMI_HMAC_SECRET:-}
       BBSGO_INSTALL_DOCKER_BUILTIN_MYSQL: "true"
       BBSGO_DOCKER_BUILTIN_MYSQL_HOST: mysql
