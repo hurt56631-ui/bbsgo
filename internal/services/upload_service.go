@@ -18,7 +18,10 @@ import (
 	"bbs-go/internal/pkg/uploader"
 )
 
-const forumImageUploadMaxBytes int64 = 10 * 1024 * 1024
+const (
+	forumImageUploadMaxBytes int64 = 10 * 1024 * 1024
+	forumVoiceUploadMaxBytes int64 = 5 * 1024 * 1024
+)
 
 var UploadService = newUploadService()
 
@@ -86,6 +89,20 @@ func (s *uploadService) PutImageStream(body io.Reader, contentLength int64, cont
 	}
 	contentType = uploader.NormalizeImageContentType(contentType)
 	key := uploader.GenerateImageKeyByContentType(contentType)
+	opts := &uploader.PutOptions{ContentType: contentType, ContentLength: contentLength}
+	return s.putObject(key, body, opts)
+}
+
+// PutVoiceStream 流式上传网页语音消息。语音采用独立 voice/ 前缀，
+// 这样删除评论/帖子时可以沿用论坛现有的对象清理队列。
+func (s *uploadService) PutVoiceStream(body io.Reader, contentLength int64, contentType string) (string, error) {
+	if contentLength <= 0 {
+		return "", fmt.Errorf("voice content length is required")
+	}
+	if contentLength > forumVoiceUploadMaxBytes {
+		return "", fmt.Errorf("voice exceeds 5 MB upload limit")
+	}
+	key := uploader.GenerateVoiceKeyByContentType(contentType)
 	opts := &uploader.PutOptions{ContentType: contentType, ContentLength: contentLength}
 	return s.putObject(key, body, opts)
 }
@@ -165,8 +182,8 @@ func hasParentPathSegment(value string) bool {
 
 func isForumManagedObjectKey(key string) bool {
 	key = strings.Trim(strings.TrimSpace(strings.ReplaceAll(key, "\\", "/")), "/")
-	return strings.HasPrefix(key, "images/") || strings.HasPrefix(key, "attachments/") ||
-		strings.HasPrefix(key, "test/images/") || strings.HasPrefix(key, "test/attachments/")
+	return strings.HasPrefix(key, "images/") || strings.HasPrefix(key, "attachments/") || strings.HasPrefix(key, "voice/") ||
+		strings.HasPrefix(key, "test/images/") || strings.HasPrefix(key, "test/attachments/") || strings.HasPrefix(key, "test/voice/")
 }
 
 func uploadBackendRecognizable(cfg dto.UploadConfig, method dto.UploadMethod) bool {

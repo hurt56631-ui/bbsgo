@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -601,6 +602,30 @@ func (c *storageTargetCollector) addForumObjectURL(raw string) {
 	c.items[target.Backend+"\x00"+target.ObjectKey] = target
 }
 
+func isVoiceStorageObjectKey(key string) bool {
+	key = strings.Trim(strings.TrimSpace(strings.ReplaceAll(key, "\\", "/")), "/")
+	lower := strings.ToLower(key)
+	if !(strings.HasPrefix(lower, "voice/") || strings.HasPrefix(lower, "test/voice/") ||
+		strings.HasPrefix(lower, "attachments/") || strings.HasPrefix(lower, "test/attachments/")) {
+		return false
+	}
+	switch path.Ext(lower) {
+	case ".webm", ".ogg", ".m4a", ".aac", ".mp3", ".wav":
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *storageTargetCollector) addVoiceObjectURL(raw string) {
+	method, key, ok := UploadService.ResolveOwnedObject(raw)
+	if !ok || !isVoiceStorageObjectKey(key) {
+		return
+	}
+	target := storageDeleteTarget{Backend: string(method), ObjectKey: key}
+	c.items[target.Backend+"\x00"+target.ObjectKey] = target
+}
+
 func (c *storageTargetCollector) addImageList(raw string) {
 	for _, image := range req.ParseImageList(raw) {
 		c.addForumObjectURL(image.Url)
@@ -614,12 +639,34 @@ func (c *storageTargetCollector) addInlineContent(content string) {
 }
 
 func (c *storageTargetCollector) addVoiceContent(content string) {
-	path, ok := normalizeTangSengForumVoicePath(content)
-	if !ok {
+	lines := strings.Split(content, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "voice:") {
+			return
+		}
+
+		rawURL := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(line, "voice:"), "|", 2)[0])
+		if rawURL != "" {
+			// Only collect actual voice objects here. A comment body is user-controlled,
+			// so a forged voice: marker must never be able to enqueue an unrelated
+			// forum image or document for deletion. Legacy browser builds stored audio
+			// under attachments/, so audio extensions in that prefix remain supported.
+			c.addVoiceObjectURL(rawURL)
+		}
+
+		// Android voice messages can still point at TangSengDaoDao's
+		// common/forum/* file service. Keep the existing deletion bridge for them.
+		path, ok := normalizeTangSengForumVoicePath(line)
+		if ok {
+			target := storageDeleteTarget{Backend: storageDeleteBackendTangSeng, ObjectKey: path}
+			c.items[target.Backend+"\x00"+target.ObjectKey] = target
+		}
 		return
 	}
-	target := storageDeleteTarget{Backend: storageDeleteBackendTangSeng, ObjectKey: path}
-	c.items[target.Backend+"\x00"+target.ObjectKey] = target
 }
 
 func (c *storageTargetCollector) targets() []storageDeleteTarget {
@@ -631,6 +678,12 @@ func (c *storageTargetCollector) targets() []storageDeleteTarget {
 }
 
 func normalizeTangSengForumVoicePath(content string) (string, bool) {
+	return NormalizeTangSengForumVoicePath(content)
+}
+
+// NormalizeTangSengForumVoicePath extracts the storage object path from a
+// legacy Android voice comment. Only common/forum/* is accepted.
+func NormalizeTangSengForumVoicePath(content string) (string, bool) {
 	content = strings.TrimSpace(content)
 	if !strings.HasPrefix(content, "voice:") {
 		return "", false
@@ -645,6 +698,19 @@ func normalizeTangSengForumVoicePath(content string) (string, bool) {
 		value = u.Path
 	}
 	value = strings.TrimSpace(value)
+	// url.Parse decodes one escaped layer in Path. Decode at most two more
+	// layers so a crafted %252e%252e path cannot become traversal only after
+	// the downstream file service performs another URL decode.
+	for i := 0; i < 2; i++ {
+		decoded, err := url.PathUnescape(value)
+		if err != nil {
+			return "", false
+		}
+		if decoded == value {
+			break
+		}
+		value = decoded
+	}
 	value = strings.TrimPrefix(value, "/")
 	value = strings.TrimPrefix(value, "v1/")
 	value = strings.TrimPrefix(value, "file/preview/")
@@ -654,8 +720,13 @@ func normalizeTangSengForumVoicePath(content string) (string, bool) {
 	for strings.Contains(value, "//") {
 		value = strings.ReplaceAll(value, "//", "/")
 	}
-	if !strings.HasPrefix(value, "common/forum/") || strings.Contains(value, "../") || strings.HasSuffix(value, "/") {
+	if !strings.HasPrefix(value, "common/forum/") || strings.HasSuffix(value, "/") {
 		return "", false
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "." || segment == ".." {
+			return "", false
+		}
 	}
 	return value, true
 }

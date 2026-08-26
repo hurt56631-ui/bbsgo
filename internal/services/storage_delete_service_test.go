@@ -34,6 +34,7 @@ func TestResolveOwnedObjectKeyAcrossBackends(t *testing.T) {
 		ok     bool
 	}{
 		{"local relative", dto.Local, "/res/uploads/images/2026/a.webp", "images/2026/a.webp", true},
+		{"local voice", dto.Local, "/res/uploads/voice/2026/a.webm", "voice/2026/a.webm", true},
 		{"aliyun custom host", dto.AliyunOss, "https://cdn.example.com/forum/images/2026/a.webp?x=1", "images/2026/a.webp", true},
 		{"tencent canonical", dto.TencentCos, "https://bucket-123.cos.ap-shanghai.myqcloud.com/images/2026/a.webp", "images/2026/a.webp", true},
 		{"s3 canonical", dto.AwsS3, "https://bucket.s3.ap-northeast-1.amazonaws.com/images/2026/a.webp", "images/2026/a.webp", true},
@@ -61,6 +62,10 @@ func TestNormalizeTangSengForumVoicePath(t *testing.T) {
 		{"voice:https://api.example.com/v1/file/preview/common/forum/u/voice.m4a?filename=x|8|1,2", "common/forum/u/voice.m4a", true},
 		{"voice:file/preview/common/avatar/u.png|1|", "", false},
 		{"voice:file/preview/common/forum/../avatar/u.png|1|", "", false},
+		{"voice:file/preview/common/forum/%2e%2e/avatar/u.png|1|", "", false},
+		{"voice:file/preview/common/forum/%252e%252e/avatar/u.png|1|", "", false},
+		{"voice:file/preview/common/forum/a/%255c..%255csecret.m4a|1|", "", false},
+		{"voice:file/preview/common/forum/u/hello%20world.m4a|1|", "common/forum/u/hello world.m4a", true},
 		{"plain text", "", false},
 	}
 	for _, tc := range tests {
@@ -224,5 +229,77 @@ func TestForumStorageReferenceFieldsProtectCrossFeatureImages(t *testing.T) {
 		if !protected[key] {
 			t.Fatalf("missing cross-feature storage reference protection for %s", key)
 		}
+	}
+}
+
+func TestStorageTargetCollectorFindsMixedVoiceMarkers(t *testing.T) {
+	collector := newStorageTargetCollector()
+	collector.addVoiceContent("normal text\nvoice:/res/uploads/voice/2026/08/web.webm|7|")
+	collector.addVoiceContent("reply text\nvoice:file/preview/common/forum/u/app.m4a|8|")
+
+	foundLocal := false
+	foundTangSeng := false
+	for _, target := range collector.targets() {
+		if target.ObjectKey == "voice/2026/08/web.webm" {
+			foundLocal = true
+		}
+		if target.Backend == storageDeleteBackendTangSeng && target.ObjectKey == "common/forum/u/app.m4a" {
+			foundTangSeng = true
+		}
+	}
+	if !foundLocal {
+		t.Fatalf("mixed web voice marker was not collected")
+	}
+	if !foundTangSeng {
+		t.Fatalf("mixed TangSeng voice marker was not collected")
+	}
+}
+
+func TestVoiceStorageObjectKeyRestriction(t *testing.T) {
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{"voice/2026/08/new.webm", true},
+		{"test/voice/2026/08/new.m4a", true},
+		// Compatibility with the older browser patch that stored recorded audio
+		// in the generic attachments/ prefix.
+		{"attachments/2026/08/legacy.m4a", true},
+		{"test/attachments/2026/08/legacy.aac", true},
+		{"voice/2026/08/not-a-voice.webp", false},
+		{"images/2026/08/victim.webp", false},
+		{"attachments/2026/08/document.pdf", false},
+		{"attachments/2026/08/image.png", false},
+		{"attachments/2026/08/video.mp4", false},
+	}
+	for _, tt := range tests {
+		if got := isVoiceStorageObjectKey(tt.key); got != tt.want {
+			t.Fatalf("isVoiceStorageObjectKey(%q) = %v, want %v", tt.key, got, tt.want)
+		}
+	}
+}
+
+func TestStorageTargetCollectorVoiceMarkerCannotDeleteUnrelatedForumObject(t *testing.T) {
+	collector := newStorageTargetCollector()
+	collector.addVoiceContent("voice:/res/uploads/images/2026/08/victim.webp|8|")
+	collector.addVoiceContent("voice:/res/uploads/attachments/2026/08/document.pdf|8|")
+	collector.addVoiceContent("voice:/res/uploads/attachments/2026/08/legacy.m4a|8|")
+	collector.addVoiceContent("voice:/res/uploads/voice/2026/08/current.webm|8|")
+
+	found := make(map[string]bool)
+	for _, target := range collector.targets() {
+		found[target.ObjectKey] = true
+	}
+	if found["images/2026/08/victim.webp"] {
+		t.Fatalf("forged voice marker must not collect an image for deletion")
+	}
+	if found["attachments/2026/08/document.pdf"] {
+		t.Fatalf("forged voice marker must not collect a non-audio attachment for deletion")
+	}
+	if !found["attachments/2026/08/legacy.m4a"] {
+		t.Fatalf("legacy attachment-backed voice was not collected")
+	}
+	if !found["voice/2026/08/current.webm"] {
+		t.Fatalf("current voice object was not collected")
 	}
 }
