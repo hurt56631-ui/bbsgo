@@ -128,6 +128,7 @@ func newRouter() *gin.Engine {
 	}
 	app.Use(cors.New(corsConfig))
 	app.Use(middleware.AttachmentMiddleware)
+	app.Use(middleware.VoiceMediaMiddleware)
 
 	registerAPIRoutes(app.Group("/api", middleware.InstallMiddleware, middleware.AuthMiddleware))
 	registerAdminRoutes(app.Group("/api/admin", middleware.InstallMiddleware, middleware.AuthMiddleware, middleware.AdminMiddleware))
@@ -282,6 +283,7 @@ func registerAPIRoutes(group *gin.RouterGroup) {
 	uploadGroup.POST("", apiHandlers.UploadHandle)
 	uploadGroup.POST("/voice", apiHandlers.UploadVoiceHandle)
 	uploadGroup.GET("/voice/preview", apiHandlers.VoicePreviewHandle)
+	uploadGroup.HEAD("/voice/preview", apiHandlers.VoicePreviewHandle)
 
 	attachmentGroup := group.Group("/attachment")
 	attachmentGroup.POST("/upload", apiHandlers.AttachmentUpload)
