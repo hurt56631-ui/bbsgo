@@ -37,7 +37,13 @@ type Rating = "again" | "hard" | "good" | "easy"
 type Settings = { showPinyin: boolean; showPhonetic: boolean; autoRead: boolean }
 type PositionMap = Record<string, { index: number; itemId?: string }>
 
-type TouchPoint = { x: number; y: number }
+type TouchPoint = {
+  x: number
+  y: number
+  scrollTop: number
+  scrollHeight: number
+  clientHeight: number
+}
 
 const defaultSettings: Settings = { showPinyin: true, showPhonetic: true, autoRead: true }
 
@@ -112,6 +118,7 @@ export function WordsPage() {
   const [recordingTarget, setRecordingTarget] = React.useState("")
   const [strokeTarget, setStrokeTarget] = React.useState<WordItem | null>(null)
   const touchStart = React.useRef<TouchPoint | null>(null)
+  const studyScrollRef = React.useRef<HTMLDivElement | null>(null)
   const ignoreClick = React.useRef(false)
   const actionLock = React.useRef(false)
   const packAbort = React.useRef<AbortController | null>(null)
@@ -153,6 +160,33 @@ export function WordsPage() {
   const isFavorite = current
     ? favorites.some((item) => `${item.packId}:${item.id}` === currentKey)
     : false
+
+  React.useEffect(() => {
+    if (!current) return
+    const previousOverflow = document.body.style.overflow
+    const previousOverscrollBehavior = document.body.style.overscrollBehavior
+    const siteHeader = Array.from(document.querySelectorAll<HTMLElement>("header")).find(
+      (header) => !header.closest("[data-learning-fullscreen]")
+    ) || null
+    const previousHeaderDisplay = siteHeader?.style.display || ""
+
+    document.body.style.overflow = "hidden"
+    document.body.style.overscrollBehavior = "none"
+    if (siteHeader) siteHeader.style.display = "none"
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.body.style.overscrollBehavior = previousOverscrollBehavior
+      if (siteHeader) siteHeader.style.display = previousHeaderDisplay
+    }
+  }, [Boolean(current)])
+
+  React.useEffect(() => {
+    const element = studyScrollRef.current
+    if (!element) return
+    element.scrollTop = 0
+    element.scrollLeft = 0
+  }, [current?.id, current?.packId, front])
 
   React.useEffect(() => {
     if (!current || !front || !settings.autoRead) return
@@ -295,18 +329,29 @@ export function WordsPage() {
     setFront(true)
   }
 
-  function previous() {
-    if (index <= 0) return
-    setIndex((value) => value - 1)
+  function move(delta: number) {
+    if (!items.length) return
+    const next = Math.max(0, Math.min(items.length - 1, index + delta))
+    if (next === index) return
+    stopSpeech()
+    setIndex(next)
     setFront(true)
   }
 
-  function onTouchStart(event: React.TouchEvent) {
+
+  function onTouchStart(event: React.TouchEvent<HTMLElement>) {
     const point = event.touches[0]
-    touchStart.current = { x: point.clientX, y: point.clientY }
+    const element = event.currentTarget
+    touchStart.current = {
+      x: point.clientX,
+      y: point.clientY,
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }
   }
 
-  function onTouchEnd(event: React.TouchEvent) {
+  function onTouchEnd(event: React.TouchEvent<HTMLElement>) {
     if (!current) return
     const start = touchStart.current
     touchStart.current = null
@@ -316,14 +361,19 @@ export function WordsPage() {
     const dy = point.clientY - start.y
     let handled = false
 
-    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+    if (Math.abs(dy) > 68 && Math.abs(dy) > Math.abs(dx) * 1.15) {
+      const scrollable = start.scrollHeight > start.clientHeight + 8
+      const atTop = start.scrollTop <= 8
+      const atBottom = start.scrollTop + start.clientHeight >= start.scrollHeight - 8
+      if (front || !scrollable || (dy > 0 && atTop) || (dy < 0 && atBottom)) {
+        handled = true
+        move(dy < 0 ? 1 : -1)
+      }
+    } else if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.2) {
       handled = true
       if (dx < 0) commitRating("again")
       else if (front) setFront(false)
       else commitRating("good")
-    } else if (front && dy > 75 && Math.abs(dy) > Math.abs(dx) * 1.2) {
-      handled = true
-      toggleFavorite()
     }
 
     if (handled) {
@@ -352,9 +402,9 @@ export function WordsPage() {
 
   if (current) {
     return (
-      <div className="min-h-[calc(100vh-56px)] bg-[#f3f4f8] text-[#181d2a]">
-        <div className="mx-auto flex min-h-[calc(100vh-56px)] w-full max-w-3xl flex-col px-3 pb-4 pt-2 sm:px-5">
-          <header className="flex h-12 items-center gap-2">
+      <div data-learning-fullscreen className="fixed inset-0 z-[100] h-[100dvh] overflow-hidden bg-[#f3f4f8] text-[#181d2a]">
+        <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-[max(6px,env(safe-area-inset-top))] sm:px-5">
+          <header className="flex h-12 shrink-0 items-center gap-2">
             <button type="button" onClick={leavePack} className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#586171] shadow-sm" aria-label="返回"><ArrowLeft className="h-5 w-5" /></button>
             <div className="min-w-0 flex-1 text-center">
               <p className="truncate text-sm font-black">{packTitle}</p>
@@ -370,17 +420,18 @@ export function WordsPage() {
           </div>
 
           <div
+            ref={studyScrollRef}
             onClick={() => {
               if (ignoreClick.current) { ignoreClick.current = false; return }
               setFront((value) => !value)
             }}
             onTouchStart={onTouchStart}
             onTouchEnd={onTouchEnd}
-            className={`relative mt-1 min-h-[480px] flex-1 overflow-hidden rounded-[30px] border border-white bg-white text-left shadow-[0_18px_55px_rgba(53,60,91,.13)] sm:min-h-[540px] ${front ? "touch-none" : "touch-pan-y"}`}
+            className={`relative mt-1 min-h-0 flex-1 rounded-[30px] border border-white bg-white text-left shadow-[0_18px_55px_rgba(53,60,91,.13)] ${front ? "touch-none overflow-hidden" : "touch-pan-y overflow-y-auto overscroll-contain"}`}
           >
             {front ? (
-              <div className="flex h-full min-h-[480px] flex-col items-center justify-center px-6 py-8 text-center sm:min-h-[540px]">
-                <p className="absolute inset-x-0 top-6 text-center text-[11px] font-bold text-[#abb0bb]">点击翻面 · 左滑不认识 · 右滑看答案 · 下拉收藏</p>
+              <div className="flex h-full min-h-full flex-col items-center justify-center px-6 py-8 text-center">
+                <p className="absolute inset-x-0 top-6 text-center text-[11px] font-bold text-[#abb0bb]">上滑下一词 · 下滑上一词 · 点击翻面 · 左滑不认识 · 右滑看答案</p>
                 <h1 className="text-[58px] font-black leading-tight tracking-tight sm:text-[70px]">{current.word}</h1>
                 {settings.showPinyin && current.pinyin ? <p className="mt-3 text-[22px] font-semibold text-[#4b7fc8]">{current.pinyin}</p> : null}
                 {settings.showPhonetic && current.phoneticMy ? <p className="mt-2 text-lg font-black text-[#bb7818]">{current.phoneticMy}</p> : null}
@@ -393,7 +444,7 @@ export function WordsPage() {
                 </div>
               </div>
             ) : (
-              <div className="max-h-[640px] overflow-y-auto px-6 pb-8 pt-6 sm:px-8" onClick={(event) => { if ((event.target as HTMLElement).closest("button,a,audio")) event.stopPropagation() }}>
+              <div className="min-h-full px-6 pb-8 pt-6 sm:px-8" onClick={(event) => { if ((event.target as HTMLElement).closest("button,a,audio")) event.stopPropagation() }}>
                 <div className="flex items-end justify-between gap-4 border-b border-[#eceef2] pb-4">
                   <h2 className="text-[36px] font-black">{current.word}</h2>
                   {settings.showPinyin && current.pinyin ? <p className="text-base font-semibold text-[#4b7fc8]">{current.pinyin}</p> : null}
@@ -429,7 +480,7 @@ export function WordsPage() {
             <button type="button" onClick={() => commitRating("good")} className="h-12 rounded-2xl bg-[#e2f7ec] text-sm font-black text-[#27845e]">认识</button>
             <button type="button" onClick={() => commitRating("easy")} className="h-12 rounded-2xl bg-[#e9edff] text-sm font-black text-[#5f58d9]">简单</button>
           </div>
-          <button type="button" onClick={previous} disabled={index === 0} className="mx-auto mt-2 text-xs font-bold text-[#858c99] disabled:opacity-30">上一个</button>
+          <p className="mx-auto mt-2 text-[10px] font-bold text-[#9aa0ac]">上滑下一词 · 下滑上一词</p>
         </div>
 
         <HanziStrokeModal open={Boolean(strokeTarget)} word={strokeTarget?.word || ""} pinyin={strokeTarget?.pinyin || ""} onClose={() => setStrokeTarget(null)} />

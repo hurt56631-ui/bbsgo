@@ -47,6 +47,7 @@ type TouchPoint = {
   scrollTop: number
   scrollHeight: number
   clientHeight: number
+  bottomReserve: number
 }
 
 const defaultSettings: Settings = { autoRead: true, showPhonetic: true }
@@ -165,6 +166,7 @@ export function PhrasesPage() {
   const [settings, setSettings] = React.useState<Settings>(defaultSettings)
   const [recordingTarget, setRecordingTarget] = React.useState("")
   const touchStart = React.useRef<TouchPoint | null>(null)
+  const studyScrollRef = React.useRef<HTMLElement | null>(null)
   const packAbort = React.useRef<AbortController | null>(null)
 
   React.useEffect(() => {
@@ -204,6 +206,33 @@ export function PhrasesPage() {
   const isFavorite = current
     ? favorites.some((item) => `${item.packId}:${item.id}` === currentKey)
     : false
+
+  React.useEffect(() => {
+    if (!current) return
+    const previousOverflow = document.body.style.overflow
+    const previousOverscrollBehavior = document.body.style.overscrollBehavior
+    const siteHeader = Array.from(document.querySelectorAll<HTMLElement>("header")).find(
+      (header) => !header.closest("[data-learning-fullscreen]")
+    ) || null
+    const previousHeaderDisplay = siteHeader?.style.display || ""
+
+    document.body.style.overflow = "hidden"
+    document.body.style.overscrollBehavior = "none"
+    if (siteHeader) siteHeader.style.display = "none"
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.body.style.overscrollBehavior = previousOverscrollBehavior
+      if (siteHeader) siteHeader.style.display = previousHeaderDisplay
+    }
+  }, [Boolean(current)])
+
+  React.useEffect(() => {
+    const element = studyScrollRef.current
+    if (!element) return
+    element.scrollTop = 0
+    element.scrollLeft = 0
+  }, [current?.id, current?.packId, detailPage])
 
   React.useEffect(() => {
     if (!current) return
@@ -334,20 +363,24 @@ export function PhrasesPage() {
 
   function move(delta: number) {
     if (!phrases.length) return
+    const next = Math.max(0, Math.min(phrases.length - 1, index + delta))
+    if (next === index) return
     stopSpeech()
-    setIndex((value) => Math.max(0, Math.min(phrases.length - 1, value + delta)))
+    setIndex(next)
     setDetailPage(0)
   }
 
   function onTouchStart(event: React.TouchEvent<HTMLElement>) {
     const point = event.touches[0]
     const element = event.currentTarget
+    const bottomReserve = Number.parseFloat(window.getComputedStyle(element).paddingBottom) || 0
     touchStart.current = {
       x: point.clientX,
       y: point.clientY,
       scrollTop: element.scrollTop,
       scrollHeight: element.scrollHeight,
       clientHeight: element.clientHeight,
+      bottomReserve,
     }
   }
 
@@ -364,9 +397,13 @@ export function PhrasesPage() {
       return
     }
     if (Math.abs(dy) <= 65 || Math.abs(dy) <= Math.abs(dx) * 1.2) return
-    const scrollable = start.scrollHeight > start.clientHeight + 8
+    const effectiveScrollHeight = Math.max(
+      start.clientHeight,
+      start.scrollHeight - start.bottomReserve
+    )
+    const scrollable = effectiveScrollHeight > start.clientHeight + 8
     const atTop = start.scrollTop <= 8
-    const atBottom = start.scrollTop + start.clientHeight >= start.scrollHeight - 8
+    const atBottom = start.scrollTop + start.clientHeight >= effectiveScrollHeight - 8
     if (!scrollable || (dy > 0 && atTop) || (dy < 0 && atBottom)) {
       move(dy < 0 ? 1 : -1)
     }
@@ -381,11 +418,11 @@ export function PhrasesPage() {
     const trailingPunctuation = trailingSentencePunctuation(current.text)
 
     return (
-      <div className="min-h-[calc(100vh-56px)] bg-[#f3f4f8] text-[#191e2b]">
-        <div className="mx-auto flex min-h-[calc(100vh-56px)] w-full max-w-3xl flex-col">
-          <header className="flex h-[54px] items-center gap-2 px-3">
+      <div data-learning-fullscreen className="fixed inset-0 z-[100] h-[100dvh] overflow-hidden bg-[#f3f4f8] text-[#191e2b]">
+        <div className="mx-auto flex h-full w-full max-w-3xl flex-col">
+          <header className="box-content flex h-[46px] shrink-0 items-end gap-2 px-3 pb-2 pt-[env(safe-area-inset-top)]">
             <button type="button" onClick={leavePack} className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#626979] shadow-sm" aria-label="返回"><ArrowLeft className="h-5 w-5" /></button>
-            <div className="min-w-0 flex-1 text-center"><p className="truncate text-sm font-black">{packTitle}</p><p className="text-[10px] font-bold text-[#999fac]">{index + 1}/{phrases.length}</p></div>
+            <div className="min-w-0 flex-1 text-center"><p className="truncate text-sm font-black">{packTitle}</p><p className="text-[10px] font-bold text-[#999fac]">{index + 1}/{phrases.length} · ↑下一句 ↓上一句</p></div>
             <button type="button" onClick={toggleFavorite} className={`flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-sm ${isFavorite ? "text-[#ed6683]" : "text-[#6d7483]"}`} aria-label="收藏"><Heart className={`h-5 w-5 ${isFavorite ? "fill-current" : ""}`} /></button>
           </header>
 
@@ -394,7 +431,7 @@ export function PhrasesPage() {
             <button type="button" onClick={() => saveSettings({ ...settings, showPhonetic: !settings.showPhonetic })} className={`h-8 rounded-full px-3 text-[11px] font-black ${settings.showPhonetic ? "bg-[#fff1df] text-[#b97817]" : "bg-white text-[#818896]"}`}>谐音 {settings.showPhonetic ? "开" : "关"}</button>
           </div>
 
-          <main onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} className="relative flex-1 touch-pan-y overflow-y-auto rounded-t-[30px] bg-white px-4 pb-32 pt-4 shadow-[0_-10px_35px_rgba(38,44,70,.08)] sm:px-6">
+          <main ref={studyScrollRef} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} style={{ paddingBottom: detailPage === 0 ? "calc(112px + env(safe-area-inset-bottom))" : "calc(24px + env(safe-area-inset-bottom))" }} className="relative min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain rounded-t-[30px] bg-white px-4 pt-4 shadow-[0_-10px_35px_rgba(38,44,70,.08)] sm:px-6">
             {detailPage === 0 ? (
               <>
                 {image ? <img src={image} alt={current.text} className="mx-auto mb-4 aspect-video w-full max-w-[360px] rounded-[20px] object-cover" /> : null}

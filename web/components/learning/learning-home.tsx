@@ -1,11 +1,13 @@
 "use client"
 
+import * as React from "react"
 import Link from "@/components/common/link"
 import {
   BookOpenIcon,
   ChevronRight,
   LanguagesIcon,
   ListChecks,
+  Menu,
   MessageCircle,
 } from "lucide-react"
 
@@ -61,9 +63,72 @@ const studyCards = [
   },
 ] as const
 
+type SiteMenuItem = { href: string; label: string }
+
 export function LearningHome() {
+  const [menuOpen, setMenuOpen] = React.useState(false)
+  const [menuItems, setMenuItems] = React.useState<SiteMenuItem[]>([])
+  const siteHeaderRef = React.useRef<HTMLElement | null>(null)
+
+  React.useEffect(() => {
+    const headers = Array.from(document.querySelectorAll<HTMLElement>("header"))
+    const siteHeader = headers.find((header) => !header.closest("[data-learning-home]")) || null
+    if (!siteHeader) return
+
+    siteHeaderRef.current = siteHeader
+    const previousDisplay = siteHeader.style.display
+    const links = Array.from(siteHeader.querySelectorAll<HTMLAnchorElement>("a[href]"))
+      .map((link) => ({
+        href: link.getAttribute("href") || "",
+        label:
+          (link.textContent || "").replace(/\s+/g, " ").trim() ||
+          link.getAttribute("aria-label") ||
+          link.getAttribute("title") ||
+          "",
+      }))
+      .filter((item) => item.href && item.label)
+      .filter((item, index, all) =>
+        all.findIndex((other) => other.href === item.href) === index
+      )
+
+    if (links.length) setMenuItems(links)
+    siteHeader.style.display = "none"
+
+    return () => {
+      siteHeader.style.display = previousDisplay
+      siteHeaderRef.current = null
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (!menuOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false)
+    }
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener("keydown", onKeyDown)
+    }
+  }, [menuOpen])
+
+  function toggleSiteMenu() {
+    if (menuItems.length) {
+      setMenuOpen((value) => !value)
+      return
+    }
+
+    const siteHeader = siteHeaderRef.current
+    const trigger = siteHeader?.querySelector<HTMLElement>(
+      'button[aria-label*="菜单"], button[aria-label*="menu" i], [data-menu-trigger], [data-site-menu-trigger]'
+    )
+    trigger?.click()
+  }
+
   return (
-    <div className="relative overflow-hidden bg-[#f7f8fb] text-[#182033]">
+    <div data-learning-home className="relative overflow-hidden bg-[#f7f8fb] text-[#182033]">
       <section className="relative h-[304px] overflow-hidden bg-[#253044] sm:h-[340px]">
         <img
           src="/images/learning-home-hero.webp"
@@ -72,6 +137,42 @@ export function LearningHome() {
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/5 to-[#17213a]/88" />
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#17213a]/95 to-transparent" />
+
+        <button
+          type="button"
+          onClick={toggleSiteMenu}
+          aria-label={menuOpen ? "关闭菜单" : "打开菜单"}
+          aria-expanded={menuOpen}
+          className="absolute left-4 top-[max(14px,env(safe-area-inset-top))] z-30 flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-black/22 text-white shadow-[0_8px_24px_rgba(0,0,0,.2)] backdrop-blur-md transition active:scale-95 sm:left-6"
+        >
+          <Menu className="h-6 w-6" />
+        </button>
+
+        {menuOpen ? (
+          <>
+            <button
+              type="button"
+              aria-label="关闭菜单"
+              onClick={() => setMenuOpen(false)}
+              className="fixed inset-0 z-40 bg-black/25"
+            />
+            <nav
+              style={{ top: "calc(max(14px, env(safe-area-inset-top)) + 52px)" }}
+              className="absolute left-4 z-50 max-h-[min(70dvh,520px)] w-[min(78vw,300px)] overflow-y-auto rounded-[22px] border border-white/35 bg-[#17213a]/92 p-2 text-white shadow-[0_18px_55px_rgba(0,0,0,.28)] backdrop-blur-xl sm:left-6"
+            >
+              {menuItems.map((item) => (
+                <Link
+                  key={`${item.href}-${item.label}`}
+                  href={item.href}
+                  onClick={() => setMenuOpen(false)}
+                  className="block rounded-[16px] px-4 py-3 text-sm font-bold text-white/92 transition-colors hover:bg-white/10 active:bg-white/15"
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+          </>
+        ) : null}
 
         <div className="relative mx-auto flex h-full w-full max-w-[1180px] items-end px-5 pb-[72px] sm:px-7 sm:pb-[78px]">
           <div className="max-w-xl text-white">
