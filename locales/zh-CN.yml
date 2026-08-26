@@ -197,6 +197,10 @@ upload:
   invalid_image_dimensions: "图片尺寸无效"
   image_dimensions_too_large: "图片尺寸过大"
   image_format_mismatch: "图片格式与文件内容不一致"
+  voice_too_large: "语音不能超过 %d MB"
+  empty_voice: "语音文件为空"
+  invalid_voice_data: "语音数据无效"
+  unsupported_voice_format: "不支持该语音格式"
 
 attachment:
   not_found: "附件不存在或已下架"
@@ -226,6 +230,7 @@ message:
   comment_topic_reply_msg_title: "回复了你的话题"
   comment_article_reply_msg_title: "回复了你的文章"
   comment_reply_msg_title: "回复了你的评论"
+  voice_message: "语音消息"
 
 email:
   new_message: "新消息提醒"

@@ -198,6 +198,10 @@ upload:
   invalid_image_dimensions: "ဓာတ်ပုံအရွယ်အစား မမှန်ကန်ပါ"
   image_dimensions_too_large: "ဓာတ်ပုံအလျားအနံ ကြီးလွန်းပါသည်"
   image_format_mismatch: "ဓာတ်ပုံဖိုင်အမျိုးအစားနှင့် ဖိုင်အကြောင်းအရာ မကိုက်ညီပါ"
+  voice_too_large: "အသံဖိုင်သည် %d MB ထက် မကျော်ရပါ"
+  empty_voice: "အသံဖိုင် မရှိပါ"
+  invalid_voice_data: "အသံဖိုင်အချက်အလက် မမှန်ကန်ပါ"
+  unsupported_voice_format: "ဤအသံဖိုင်အမျိုးအစားကို မထောက်ပံ့ပါ"
 
 attachment:
   not_found: "ပူးတွဲဖိုင် မတွေ့ပါ သို့မဟုတ် အသုံးမပြုနိုင်တော့ပါ"
@@ -227,6 +231,7 @@ message:
   comment_topic_reply_msg_title: "တစ်ယောက်ယောက်က သင့်ပို့စ်ကို ပြန်လည်ဖြေကြားခဲ့သည်"
   comment_article_reply_msg_title: "တစ်ယောက်ယောက်က သင့်ဆောင်းပါးကို ပြန်လည်ဖြေကြားခဲ့သည်"
   comment_reply_msg_title: "တစ်ယောက်ယောက်က သင့်မှတ်ချက်ကို ပြန်လည်ဖြေကြားခဲ့သည်"
+  voice_message: "အသံမက်ဆေ့ချ်"
 
 email:
   new_message: "အသိပေးချက်"
