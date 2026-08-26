@@ -1014,6 +1014,7 @@ const zhCN = {
       maxDuration: "最长 60 秒",
       recordFailed: "录音失败，请重试",
       tooShort: "录音内容太短，请重新录制",
+      standaloneOnly: "语音消息请单独发送，请先清空文字和图片",
     },
     textEditor: {
       placeholder: "请输入您要发表的内容",

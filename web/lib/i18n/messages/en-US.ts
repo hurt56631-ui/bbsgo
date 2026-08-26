@@ -1032,6 +1032,7 @@ const enUS = {
       maxDuration: "Up to 60 seconds",
       recordFailed: "Recording failed. Please try again",
       tooShort: "The recording is too short. Please record again",
+      standaloneOnly: "Send voice as a standalone message. Clear text and images first",
     },
     textEditor: {
       placeholder: "Write your content",
