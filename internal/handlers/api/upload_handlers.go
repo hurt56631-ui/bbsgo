@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"image"
 	_ "image/gif"
@@ -9,6 +10,11 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"os"
+	"path"
+	"strings"
+	"time"
 
 	_ "golang.org/x/image/webp"
 
@@ -22,10 +28,12 @@ import (
 )
 
 const (
-	maxImageDimension = 16000
-	maxImagePixels    = 64_000_000
-	multipartOverhead = 1 << 20
-	mimeSniffBytes    = 512
+	maxImageDimension   = 16000
+	maxImagePixels      = 64_000_000
+	multipartOverhead   = 1 << 20
+	mimeSniffBytes      = 512
+	voiceUploadMaxMB    = 5
+	voiceUploadMaxBytes = voiceUploadMaxMB * 1024 * 1024
 )
 
 var allowedImageTypes = map[string]struct{}{
@@ -34,6 +42,8 @@ var allowedImageTypes = map[string]struct{}{
 	"image/gif":  {},
 	"image/webp": {},
 }
+
+var voicePreviewHTTPClient = &http.Client{Timeout: 60 * time.Second}
 
 func UploadHandle(ctx *gin.Context) {
 	user := common.GetCurrentUser(ctx)
@@ -93,6 +103,208 @@ func UploadHandle(ctx *gin.Context) {
 		"width":       width,
 		"height":      height,
 	})
+}
+
+func UploadVoiceHandle(ctx *gin.Context) {
+	user := common.GetCurrentUser(ctx)
+	if err := services.UserService.CheckPostStatus(user); err != nil {
+		ginx.WriteJSON(ctx, err)
+		return
+	}
+
+	ctx.Request.Body = http.MaxBytesReader(
+		ctx.Writer,
+		ctx.Request.Body,
+		voiceUploadMaxBytes+multipartOverhead,
+	)
+
+	file, header, err := ctx.Request.FormFile("audio")
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			ginx.WriteJSON(ctx, ginx.ErrorMessage(locales.Getf("upload.voice_too_large", voiceUploadMaxMB)))
+			return
+		}
+		ginx.WriteJSON(ctx, err)
+		return
+	}
+	defer file.Close()
+
+	if header.Size <= 0 || header.Size > voiceUploadMaxBytes {
+		ginx.WriteJSON(ctx, ginx.ErrorMessage(locales.Getf("upload.voice_too_large", voiceUploadMaxMB)))
+		return
+	}
+
+	contentType, err := validateUploadedVoiceStream(file)
+	if err != nil {
+		ginx.WriteJSON(ctx, ginx.ErrorMessage(err.Error()))
+		return
+	}
+
+	slog.Info("upload voice",
+		slog.String("filename", header.Filename),
+		slog.Int64("size", header.Size),
+		slog.String("contentType", contentType),
+	)
+
+	voiceURL, err := services.UploadService.PutVoiceStream(file, header.Size, contentType)
+	if err != nil {
+		ginx.WriteJSON(ctx, err)
+		return
+	}
+	ginx.WriteJSON(ctx, map[string]any{
+		"url":         voiceURL,
+		"contentType": contentType,
+		"size":        header.Size,
+	})
+}
+
+// VoicePreviewHandle proxies legacy Android/TangSeng forum voice objects.
+// The browser never needs direct access to the internal TangSeng API host.
+func VoicePreviewHandle(ctx *gin.Context) {
+	src := strings.TrimSpace(ctx.Query("src"))
+	if src == "" {
+		ctx.Status(http.StatusBadRequest)
+		return
+	}
+	objectPath, ok := services.NormalizeTangSengForumVoicePath("voice:" + src)
+	if !ok {
+		ctx.Status(http.StatusBadRequest)
+		return
+	}
+	endpoint, err := tangSengVoicePreviewURL(os.Getenv("BBSGO_TANGSENG_API_URL"), objectPath)
+	if err != nil {
+		ctx.Status(http.StatusNotFound)
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx.Request.Context(), http.MethodGet, endpoint, nil)
+	if err != nil {
+		ctx.Status(http.StatusBadGateway)
+		return
+	}
+	if rangeHeader := strings.TrimSpace(ctx.GetHeader("Range")); rangeHeader != "" {
+		req.Header.Set("Range", rangeHeader)
+	}
+	resp, err := voicePreviewHTTPClient.Do(req)
+	if err != nil {
+		ctx.Status(http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	contentType := voicePreviewContentType(resp.Header.Get("Content-Type"), objectPath)
+	if contentType != "" {
+		ctx.Header("Content-Type", contentType)
+	}
+	for _, name := range []string{"Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control"} {
+		if value := resp.Header.Get(name); value != "" {
+			ctx.Header(name, value)
+		}
+	}
+	ctx.Header("Content-Disposition", "inline")
+	ctx.Status(resp.StatusCode)
+	_, _ = io.Copy(ctx.Writer, resp.Body)
+}
+
+func voicePreviewContentType(contentType, objectPath string) string {
+	contentType = strings.TrimSpace(contentType)
+	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	fallback := voiceContentTypeFromObjectPath(objectPath)
+	if fallback != "" && (mediaType == "" || mediaType == "application/octet-stream" || mediaType == "binary/octet-stream" || !strings.HasPrefix(mediaType, "audio/")) {
+		return fallback
+	}
+	return contentType
+}
+
+func voiceContentTypeFromObjectPath(objectPath string) string {
+	switch strings.ToLower(path.Ext(strings.TrimSpace(objectPath))) {
+	case ".webm":
+		return "audio/webm"
+	case ".ogg", ".opus":
+		return "audio/ogg"
+	case ".m4a", ".mp4":
+		return "audio/mp4"
+	case ".aac":
+		return "audio/aac"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".wav":
+		return "audio/wav"
+	case ".amr":
+		return "audio/amr"
+	case ".3gp":
+		return "audio/3gpp"
+	default:
+		return ""
+	}
+}
+
+func tangSengVoicePreviewURL(base, objectPath string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(base))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", errors.New("invalid TangSeng API URL")
+	}
+	prefix := strings.TrimRight(u.Path, "/")
+	if !strings.HasSuffix(prefix, "/v1") {
+		prefix += "/v1"
+	}
+	u.Path = prefix + "/file/preview/" + strings.TrimPrefix(objectPath, "/")
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String(), nil
+}
+
+func validateUploadedVoiceStream(file io.ReadSeeker) (string, error) {
+	if file == nil {
+		return "", errors.New(locales.Get("upload.empty_voice"))
+	}
+	header := make([]byte, 64)
+	n, readErr := io.ReadFull(file, header)
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		return "", errors.New(locales.Get("upload.invalid_voice_data"))
+	}
+	if n == 0 {
+		return "", errors.New(locales.Get("upload.empty_voice"))
+	}
+	detected := detectVoiceContentType(header[:n])
+	if detected == "" {
+		return "", errors.New(locales.Get("upload.unsupported_voice_format"))
+	}
+	// The file signature is authoritative. Browsers occasionally report a
+	// generic or container MIME that differs from the actual MediaRecorder
+	// output, so rejecting on multipart Content-Type would create false
+	// negatives without adding security.
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return "", errors.New(locales.Get("upload.invalid_voice_data"))
+	}
+	return detected, nil
+}
+
+func detectVoiceContentType(header []byte) string {
+	if len(header) >= 4 && bytes.Equal(header[:4], []byte{0x1a, 0x45, 0xdf, 0xa3}) {
+		return "audio/webm"
+	}
+	if len(header) >= 4 && bytes.Equal(header[:4], []byte("OggS")) {
+		return "audio/ogg"
+	}
+	if len(header) >= 12 && bytes.Equal(header[4:8], []byte("ftyp")) {
+		return "audio/mp4"
+	}
+	if len(header) >= 12 && bytes.Equal(header[:4], []byte("RIFF")) && bytes.Equal(header[8:12], []byte("WAVE")) {
+		return "audio/wav"
+	}
+	if len(header) >= 3 && bytes.Equal(header[:3], []byte("ID3")) {
+		return "audio/mpeg"
+	}
+	// ADTS AAC sync word. Check this before generic MPEG frame sync because
+	// both start with 0xff and otherwise AAC can be misclassified as MP3.
+	if len(header) >= 2 && header[0] == 0xff && header[1]&0xf6 == 0xf0 {
+		return "audio/aac"
+	}
+	if len(header) >= 2 && header[0] == 0xff && header[1]&0xe0 == 0xe0 {
+		return "audio/mpeg"
+	}
+	return ""
 }
 
 func validateUploadedImageStream(file io.ReadSeeker) (contentType string, width, height int, err error) {
