@@ -195,6 +195,16 @@ function voiceExtension(contentType: string) {
   return "webm"
 }
 
+function absoluteVoiceUrl(value: string) {
+  const raw = String(value || "").trim()
+  if (!raw) return ""
+  if (/^https?:\/\//i.test(raw)) return raw
+  if (typeof window === "undefined") return raw
+  if (raw.startsWith("//")) return `${window.location.protocol}${raw}`
+  const path = raw.startsWith("/") ? raw : `/${raw}`
+  return new URL(path, window.location.origin).toString()
+}
+
 export async function uploadCommunityVoice(blob: Blob) {
   const contentType = blob.type || "audio/webm"
   const extension = voiceExtension(contentType)
@@ -206,8 +216,16 @@ export async function uploadCommunityVoice(blob: Blob) {
         })
   const body = new FormData()
   body.append("audio", file, file.name)
-  return apiFetch<UploadedVoice>("/api/upload/voice", {
+  const uploaded = await apiFetch<UploadedVoice>("/api/upload/voice", {
     method: "POST",
     body,
   })
+  return {
+    ...uploaded,
+    // Android forum voice comments accept an http(s) path directly. Converting
+    // local /res/uploads/... paths to the public absolute URL keeps the stored
+    // voice:PATH|SECONDS|WAVEFORM protocol identical across web and app and
+    // prevents Android from mistaking /res/... for a phone-local file.
+    url: absoluteVoiceUrl(uploaded.url),
+  }
 }
