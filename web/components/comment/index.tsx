@@ -28,6 +28,13 @@ import {
   TextEditor,
   type TextEditorRef,
 } from "@/components/comment/text-editor"
+import {
+  VoiceMessage,
+  buildVoiceCommentContent,
+  parseVoiceContent,
+  type VoiceDraft,
+} from "@/components/comment/voice-message"
+import { uploadCommunityVoice } from "@/components/editor/upload"
 import { apiFetch, toFormData } from "@/lib/api/client"
 import type { Comment, EntityId, ImageInfo, PageData } from "@/lib/api/types"
 import { PERMISSIONS } from "@/lib/auth/permissions.generated"
@@ -43,6 +50,7 @@ type EntityType = "topic" | "article" | "comment" | string
 type ReplyValue = {
   content: string
   imageList: ImageInfo[]
+  voice: VoiceDraft | null
 }
 
 const COMMENT_LIVE_REFRESH_INTERVAL_MS = 3000
@@ -51,23 +59,74 @@ function imageSrc(image: ImageInfo) {
   return image.url || image.preview || ""
 }
 
-function commentContent(comment: Comment, size: "normal" | "small" = "normal") {
+async function prepareVoiceDraft(voice: VoiceDraft) {
+  if (voice.uploadedUrl) return voice
+  const uploaded = await uploadCommunityVoice(voice.blob)
+  return { ...voice, uploadedUrl: uploaded.url }
+}
+
+async function prepareReplyValue(value: ReplyValue) {
+  if (!value.voice) {
+    return { content: value.content, voice: null as VoiceDraft | null }
+  }
+  const voice = await prepareVoiceDraft(value.voice)
+  return {
+    content: buildVoiceCommentContent(
+      value.content,
+      voice.uploadedUrl || "",
+      voice.duration
+    ),
+    voice,
+  }
+}
+
+function commentContent(
+  comment: Comment,
+  size: "normal" | "small" | "quote" = "normal"
+) {
   if (!comment.content) {
     return null
   }
 
+  const parsed = parseVoiceContent(comment.content)
   const className = cn(
-    "content mb-0 whitespace-pre-wrap text-foreground",
+    "content whitespace-pre-wrap",
     size === "normal"
-      ? "mt-2.5 text-[15px] leading-7"
-      : "mt-1.5 text-sm leading-6"
+      ? "mb-0 mt-2.5 text-[15px] leading-7 text-foreground"
+      : size === "small"
+        ? "mb-0 mt-1.5 text-sm leading-6 text-foreground"
+        : "my-1 text-sm leading-6 text-muted-foreground"
   )
 
-  if (comment.contentType === "text") {
-    return <div className={className}>{comment.content}</div>
+  const textContent = parsed.text ? (
+    comment.contentType === "text" ? (
+      <div className={className}>{parsed.text}</div>
+    ) : (
+      <HtmlImagePreview html={parsed.text} className={className} />
+    )
+  ) : null
+
+  if (!parsed.voice) {
+    return textContent
   }
 
-  return <HtmlImagePreview html={comment.content} className={className} />
+  return (
+    <>
+      {textContent}
+      <div
+        className={
+          size === "normal" ? "mt-2.5" : size === "small" ? "mt-1.5" : "my-1"
+        }
+      >
+        <VoiceMessage
+          source={parsed.voice.source}
+          duration={parsed.voice.duration}
+          waveform={parsed.voice.waveform}
+          compact={size !== "normal"}
+        />
+      </div>
+    </>
+  )
 }
 
 function CommentImages({
@@ -139,6 +198,7 @@ function CommentInput({
   const editorRef = React.useRef<TextEditorRef>(null)
   const [content, setContent] = React.useState("")
   const [imageList, setImageList] = React.useState<ImageInfo[]>([])
+  const [voice, setVoice] = React.useState<VoiceDraft | null>(null)
   const [sending, setSending] = React.useState(false)
   const lastClickTimeRef = React.useRef(0)
 
@@ -149,7 +209,7 @@ function CommentInput({
     }
     lastClickTimeRef.current = now
 
-    if (!content) {
+    if (!content.trim() && !voice) {
       toast.error(t("component.comment.input.pleaseInput"))
       return
     }
@@ -159,12 +219,23 @@ function CommentInput({
 
     setSending(true)
     try {
+      let submitContent = content
+      let submitVoice = voice
+      if (voice) {
+        submitVoice = await prepareVoiceDraft(voice)
+        if (submitVoice !== voice) setVoice(submitVoice)
+        submitContent = buildVoiceCommentContent(
+          content,
+          submitVoice.uploadedUrl || "",
+          submitVoice.duration
+        )
+      }
       const data = await apiFetch<Comment>("/api/comment/create", {
         method: "POST",
         body: toFormData({
           entityType,
           entityId,
-          content,
+          content: submitContent,
           imageList: imageList.length ? JSON.stringify(imageList) : "",
         }),
       })
@@ -172,6 +243,7 @@ function CommentInput({
       editorRef.current?.reset()
       setContent("")
       setImageList([])
+      setVoice(null)
       toast.success(t("component.comment.input.publishSuccess"))
     } catch (error) {
       catchError(error)
@@ -187,11 +259,13 @@ function CommentInput({
           ref={editorRef}
           content={content}
           imageList={imageList}
+          voice={voice}
           height={90}
           focusHeight={120}
           disabled={sending}
           onContentChange={setContent}
           onImageListChange={setImageList}
+          onVoiceChange={setVoice}
           onSubmit={() => void create()}
         />
       </div>
@@ -201,10 +275,12 @@ function CommentInput({
 
 function InlineReplyEditor({
   value,
+  disabled,
   onChange,
   onSubmit,
 }: {
   value: ReplyValue
+  disabled?: boolean
   onChange: (value: ReplyValue) => void
   onSubmit: () => void
 }) {
@@ -219,21 +295,26 @@ function InlineReplyEditor({
       ref={editorRef}
       content={value.content}
       imageList={value.imageList}
+      voice={value.voice}
       height={80}
+      disabled={disabled}
       onContentChange={(content) => onChange({ ...value, content })}
       onImageListChange={(imageList) => onChange({ ...value, imageList })}
+      onVoiceChange={(voice) => onChange({ ...value, voice })}
       onSubmit={onSubmit}
     />
   )
 }
 
-function compactReplyText(comment: Comment) {
+function compactReplyText(comment: Comment, voiceLabel: string) {
   if (!comment) return ""
-  const content = String(comment.content || "")
+  const parsed = parseVoiceContent(comment.content)
+  const content = parsed.text
     .replace(/<[^>]*>/g, " ")
     .replace(/\s+/g, " ")
     .trim()
   if (content) return content
+  if (parsed.voice) return `[${voiceLabel}]`
   if (comment.imageList?.length) return "[图片]"
   return "[回复]"
 }
@@ -270,7 +351,7 @@ function CommentSubPreview({
                 </span>
               </>
             ) : null}
-            <span>：{compactReplyText(reply)}</span>
+            <span>：{compactReplyText(reply, t("component.voice.message"))}</span>
           </div>
         ))}
       </div> : null}
@@ -306,7 +387,9 @@ function CommentSubList({
   const [replyValue, setReplyValue] = React.useState<ReplyValue>({
     content: "",
     imageList: [],
+    voice: null,
   })
+  const [replySending, setReplySending] = React.useState(false)
   const [reportComment, setReportComment] = React.useState<Comment | null>(null)
   const [confirmState, setConfirmState] =
     React.useState<ConfirmDialogState>(null)
@@ -375,37 +458,50 @@ function CommentSubList({
   }
 
   function switchShowReply(comment: Comment) {
+    if (replySending) return
     if (!currentUser) {
       msgSignIn()
       return
     }
     if (replyQuoteId === comment.id) {
       setReplyQuoteId(0)
-      setReplyValue({ content: "", imageList: [] })
+      setReplyValue({ content: "", imageList: [], voice: null })
     } else {
       setReplyQuoteId(comment.id)
     }
   }
 
   async function submitReply() {
+    if (!replyValue.content.trim() && !replyValue.voice) {
+      toast.error(t("component.comment.input.pleaseInput"))
+      return
+    }
+    if (replySending) return
+    setReplySending(true)
     try {
+      const prepared = await prepareReplyValue(replyValue)
+      if (prepared.voice && prepared.voice !== replyValue.voice) {
+        setReplyValue({ ...replyValue, voice: prepared.voice })
+      }
       const ret = await apiFetch<Comment>("/api/comment/create", {
         method: "POST",
         body: toFormData({
           entityType: "comment",
           entityId: commentId,
           quoteId: replyQuoteId,
-          content: replyValue.content,
+          content: prepared.content,
           imageList: replyValue.imageList.length
             ? JSON.stringify(replyValue.imageList)
             : "",
         }),
       })
       setReplyQuoteId(0)
-      setReplyValue({ content: "", imageList: [] })
+      setReplyValue({ content: "", imageList: [], voice: null })
       onReply(ret)
     } catch (error) {
       catchError(error)
+    } finally {
+      setReplySending(false)
     }
   }
 
@@ -493,10 +589,7 @@ function CommentSubList({
                     >
                       ”
                     </span>
-                    <HtmlImagePreview
-                      className="content my-1 text-muted-foreground"
-                      html={comment.quote.content || ""}
-                    />
+                    {commentContent(comment.quote, "quote")}
                     <CommentImages
                       images={comment.quote.imageList}
                       size="quote"
@@ -526,9 +619,10 @@ function CommentSubList({
                 <button
                   type="button"
                   className={cn(
-                    "flex items-center gap-1 text-xs text-muted-foreground select-none hover:text-primary",
+                    "flex items-center gap-1 text-xs text-muted-foreground select-none hover:text-primary disabled:cursor-not-allowed disabled:opacity-50",
                     replyQuoteId === comment.id && "font-medium text-primary"
                   )}
+                  disabled={replySending}
                   onClick={() => switchShowReply(comment)}
                 >
                   <MessageCircle className="h-3 w-3" />
@@ -567,6 +661,7 @@ function CommentSubList({
                 <div className="mt-2.5">
                   <InlineReplyEditor
                     value={replyValue}
+                    disabled={replySending}
                     onChange={setReplyValue}
                     onSubmit={() => void submitReply()}
                   />
@@ -632,7 +727,9 @@ function CommentItem({
   const [replyValue, setReplyValue] = React.useState<ReplyValue>({
     content: "",
     imageList: [],
+    voice: null,
   })
+  const [replySending, setReplySending] = React.useState(false)
   const [reportOpen, setReportOpen] = React.useState(false)
   const [confirmState, setConfirmState] =
     React.useState<ConfirmDialogState>(null)
@@ -673,37 +770,50 @@ function CommentItem({
   }
 
   function switchShowReply() {
+    if (replySending) return
     if (!currentUser) {
       msgSignIn()
       return
     }
     if (replyCommentId === comment.id) {
       setReplyCommentId(0)
-      setReplyValue({ content: "", imageList: [] })
+      setReplyValue({ content: "", imageList: [], voice: null })
     } else {
       setReplyCommentId(comment.id)
     }
   }
 
   async function submitReply(parent: Comment) {
+    if (!replyValue.content.trim() && !replyValue.voice) {
+      toast.error(t("component.comment.input.pleaseInput"))
+      return
+    }
+    if (replySending) return
+    setReplySending(true)
     try {
+      const prepared = await prepareReplyValue(replyValue)
+      if (prepared.voice && prepared.voice !== replyValue.voice) {
+        setReplyValue({ ...replyValue, voice: prepared.voice })
+      }
       const ret = await apiFetch<Comment>("/api/comment/create", {
         method: "POST",
         body: toFormData({
           entityType: "comment",
           entityId: parent.id,
-          content: replyValue.content,
+          content: prepared.content,
           imageList: replyValue.imageList.length
             ? JSON.stringify(replyValue.imageList)
             : "",
         }),
       })
       setReplyCommentId(0)
-      setReplyValue({ content: "", imageList: [] })
+      setReplyValue({ content: "", imageList: [], voice: null })
       onChanged((current) => appendReply(current, ret))
       toast.success(t("component.comment.list.publishSuccess"))
     } catch (error) {
       catchError(error)
+    } finally {
+      setReplySending(false)
     }
   }
 
@@ -832,9 +942,10 @@ function CommentItem({
             <button
               type="button"
               className={cn(
-                "flex items-center gap-1 text-[13px] text-muted-foreground select-none hover:text-primary",
+                "flex items-center gap-1 text-[13px] text-muted-foreground select-none hover:text-primary disabled:cursor-not-allowed disabled:opacity-50",
                 replyCommentId === comment.id && "font-medium text-primary"
               )}
+              disabled={replySending}
               onClick={switchShowReply}
             >
               <MessageCircle className="h-3.5 w-3.5" />
@@ -884,6 +995,7 @@ function CommentItem({
             <div className="mt-2.5">
               <InlineReplyEditor
                 value={replyValue}
+                disabled={replySending}
                 onChange={setReplyValue}
                 onSubmit={() => void submitReply(comment)}
               />
