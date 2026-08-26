@@ -1,4 +1,4 @@
-import { LearningPlaceholder } from "@/components/learning/learning-placeholder"
+import { WordsPage } from "@/components/learning/words-page"
 import { pageMeta, rootDataFromMatches } from "@/lib/seo"
 
 export function meta({
@@ -11,8 +11,8 @@ export function meta({
   const rootData = rootDataFromMatches(matches)
 
   return pageMeta(rootData?.config, "中文单词", {
-    description: "学习高频中文单词，配合拼音、发音和分级内容掌握常用词汇。",
-    keywords: ["中文单词", "汉语词汇", "普通话", "拼音", "中文学习"],
+    description: "中文单词分级学习：拼音、缅语释义、例句、搭配、近反义词、笔顺、收藏与跟读练习。",
+    keywords: ["中文单词", "汉语词汇", "普通话", "拼音", "缅甸语", "中文学习"],
     image: "/images/learning-share.jpg",
     imageWidth: 1200,
     imageHeight: 630,
@@ -22,5 +22,5 @@ export function meta({
 }
 
 export default function WordsRoute() {
-  return <LearningPlaceholder title="单词" subtitle="စကားလုံး · 高频词汇与分级学习" />
+  return <WordsPage />
 }
