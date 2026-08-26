@@ -93,6 +93,34 @@ function shouldProxyToServer(pathname) {
   )
 }
 
+function isVoiceMediaProxy(pathname) {
+  return (
+    pathname.startsWith("/res/uploads/voice/") ||
+    pathname.startsWith("/res/uploads/test/voice/") ||
+    pathname === "/api/upload/voice/preview"
+  )
+}
+
+function upstreamHeaders(req, voiceMedia) {
+  const headers = new Headers()
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value === undefined) continue
+    if (key.toLowerCase() === "host") continue
+    if (key.toLowerCase() === "connection") continue
+    if (key.toLowerCase() === "transfer-encoding") continue
+    if (Array.isArray(value)) {
+      for (const item of value) headers.append(key, item)
+    } else {
+      headers.set(key, value)
+    }
+  }
+  // Voice responses must not be transparently compressed. Keeping byte ranges,
+  // Content-Length and Content-Range intact is important for HTMLAudio and
+  // Android media stacks that probe the file before playback.
+  if (voiceMedia) headers.set("accept-encoding", "identity")
+  return headers
+}
+
 function staticEtag(stats) {
   return `W/"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`
 }
@@ -153,21 +181,29 @@ createServer(async (req, res) => {
   if (shouldProxyToServer(url.pathname)) {
     try {
       const upstream = new URL(`${url.pathname}${url.search}`, serverURL)
+      const voiceMedia = isVoiceMediaProxy(url.pathname)
       const response = await fetch(upstream, {
         method: req.method,
-        headers: req.headers,
+        headers: upstreamHeaders(req, voiceMedia),
         body:
           req.method === "GET" || req.method === "HEAD" ? undefined : req,
         duplex: "half",
       })
 
       res.statusCode = response.status
+      const encoded = Boolean(response.headers.get("content-encoding"))
       response.headers.forEach((value, key) => {
-        if (key === "content-encoding" || key === "content-length") {
-          return
-        }
+        // Undici may transparently decode encoded responses. Do not forward the
+        // stale encoded length in that case. Voice routes ask upstream for
+        // identity encoding, so their exact Content-Length is preserved.
+        if (key === "content-encoding") return
+        if (key === "content-length" && encoded) return
+        if (key === "content-length" && !voiceMedia) return
         res.setHeader(key, value)
       })
+      if (voiceMedia && !res.hasHeader("Accept-Ranges")) {
+        res.setHeader("Accept-Ranges", "bytes")
+      }
       if (response.body) {
         for await (const chunk of response.body) {
           res.write(chunk)
