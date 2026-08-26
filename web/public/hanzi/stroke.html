@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <script src="hanzi-writer.min.js"></script>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { width: 100%; height: 100%; margin: 0; background: transparent; overflow: hidden; }
+    body { display: flex; align-items: center; justify-content: center; font-family: sans-serif; color: #5f6670; }
+    #characters { width: 100%; height: 100%; display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 10px; padding: 6px 0; }
+    .char-card { position: relative; flex: 0 0 auto; border: 1px solid #E5E7EB; border-radius: 18px; background: #FAFAFB; overflow: hidden; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+    .char-card.selected { border-color: #A8A2F5; background: #F7F6FF; transform: translateY(-1px); }
+    .target, .grid { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .grid { pointer-events: none; }
+    .line { position: absolute; background: #ECEEF2; }
+    .v { width: 1px; height: 100%; left: 50%; top: 0; }
+    .h { height: 1px; width: 100%; top: 50%; left: 0; }
+    .d1, .d2 { position: absolute; width: 142%; height: 1px; background: #F0F1F4; left: -21%; top: 50%; transform-origin: center; }
+    .d1 { transform: rotate(45deg); }
+    .d2 { transform: rotate(-45deg); }
+    .state { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 12px; text-align: center; color: #9AA0A9; font-size: 12px; pointer-events: none; }
+    .error { color: #8B9098; }
+  </style>
+</head>
+<body>
+  <div id="characters"></div>
+  <script>
+    let writers = [];
+    let characters = [];
+    let loaded = [];
+    let sequenceToken = 0;
+    let loadingText = '正在加载笔顺…';
+    let errorText = '笔顺数据加载失败';
+
+    function charLoader(char, onComplete, onError) {
+      fetch('/learning-hanzi-data/' + encodeURIComponent(char), { cache: 'force-cache', credentials: 'same-origin' })
+        .then(function(response) {
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          return response.json();
+        })
+        .then(onComplete)
+        .catch(onError);
+    }
+
+    function setMessages(loading, error) {
+      if (loading) loadingText = loading;
+      if (error) errorText = error;
+    }
+
+    function isChinese(char) {
+      if (!char) return false;
+      const cp = char.codePointAt(0);
+      return (cp >= 0x3400 && cp <= 0x4DBF)
+        || (cp >= 0x4E00 && cp <= 0x9FFF)
+        || (cp >= 0xF900 && cp <= 0xFAFF)
+        || (cp >= 0x20000 && cp <= 0x2EBEF)
+        || (cp >= 0x30000 && cp <= 0x323AF);
+    }
+
+    function stageSize(count) {
+      const available = Math.max(250, document.documentElement.clientWidth - 8);
+      if (count <= 1) return Math.min(230, available);
+      if (count === 2) return Math.min(154, Math.floor((available - 12) / 2));
+      if (count <= 4) return Math.min(130, Math.floor((available - 12) / 2));
+      return Math.min(102, Math.floor((available - 22) / 3));
+    }
+
+    function stageMarkup(index, size) {
+      return '<div class="grid"><div class="line v"></div><div class="line h"></div><div class="d1"></div><div class="d2"></div></div>'
+        + '<div class="target" id="target_' + index + '"></div>'
+        + '<div class="state" id="state_' + index + '">' + loadingText + '</div>';
+    }
+
+    function setWord(word) {
+      sequenceToken += 1;
+      writers = [];
+      loaded = [];
+      characters = Array.from(word || '').filter(isChinese);
+      if (!characters.length) characters = ['你'];
+
+      const container = document.getElementById('characters');
+      container.innerHTML = '';
+      const size = stageSize(characters.length);
+
+      characters.forEach(function(char, index) {
+        const card = document.createElement('div');
+        card.className = 'char-card';
+        card.id = 'card_' + index;
+        card.style.width = size + 'px';
+        card.style.height = size + 'px';
+        card.innerHTML = stageMarkup(index, size);
+        card.addEventListener('click', function() {
+          selectCard(index);
+          if (window.StrokeHost && typeof window.StrokeHost.onCharacterTapped === 'function') {
+            window.StrokeHost.onCharacterTapped(char, index);
+          } else {
+            playCharacter(index);
+            if (window.parent && window.parent !== window) {
+              window.parent.postMessage({ type: 'talkami-hanzi-tap', character: char }, window.location.origin);
+            }
+          }
+        });
+        container.appendChild(card);
+
+        loaded[index] = false;
+        writers[index] = HanziWriter.create('target_' + index, char, {
+          width: size,
+          height: size,
+          padding: Math.max(12, Math.round(size * 0.14)),
+          showOutline: true,
+          showCharacter: false,
+          strokeColor: '#555B66',
+          outlineColor: '#D7DAE0',
+          radicalColor: '#8B7CF6',
+          strokeAnimationSpeed: 1.15,
+          delayBetweenStrokes: 110,
+          charDataLoader: charLoader,
+          onLoadCharDataSuccess: function() {
+            loaded[index] = true;
+            const state = document.getElementById('state_' + index);
+            if (state) state.style.display = 'none';
+            if (loaded.every(Boolean)) {
+              setTimeout(function() { playSequence(0); }, 120);
+            }
+          },
+          onLoadCharDataError: function() {
+            const state = document.getElementById('state_' + index);
+            if (state) {
+              state.textContent = errorText;
+              state.className = 'state error';
+            }
+          }
+        });
+      });
+    }
+
+    function selectCard(index) {
+      document.querySelectorAll('.char-card').forEach(function(card, cardIndex) {
+        card.classList.toggle('selected', cardIndex === index);
+      });
+    }
+
+    function animateOne(index, token, onComplete) {
+      const writer = writers[index];
+      if (!writer || !loaded[index] || token !== sequenceToken) {
+        if (onComplete) onComplete();
+        return;
+      }
+      selectCard(index);
+      writer.hideCharacter({ duration: 0 });
+      writer.animateCharacter({
+        onComplete: function() {
+          if (token === sequenceToken && onComplete) onComplete();
+        }
+      });
+    }
+
+    function playSequence(startIndex) {
+      sequenceToken += 1;
+      const token = sequenceToken;
+      const start = Math.max(0, Number(startIndex) || 0);
+      function next(index) {
+        if (token !== sequenceToken || index >= writers.length) return;
+        animateOne(index, token, function() {
+          setTimeout(function() { next(index + 1); }, 150);
+        });
+      }
+      next(start);
+    }
+
+    function playCharacter(index) {
+      index = Math.max(0, Math.min(writers.length - 1, Number(index) || 0));
+      sequenceToken += 1;
+      const token = sequenceToken;
+      animateOne(index, token, null);
+    }
+  </script>
+</body>
+</html>
