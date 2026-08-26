@@ -245,3 +245,24 @@ func TestGenerateImageKey_ContentTypeVariations(t *testing.T) {
 		})
 	}
 }
+
+func TestGetVoiceExt(t *testing.T) {
+	tests := []struct {
+		contentType string
+		want        string
+	}{
+		{"audio/webm;codecs=opus", ".webm"},
+		{"audio/ogg", ".ogg"},
+		{"audio/mp4;codecs=mp4a.40.2", ".m4a"},
+		{"audio/aac", ".aac"},
+		{"audio/mpeg", ".mp3"},
+		{"audio/wav", ".wav"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.contentType, func(t *testing.T) {
+			if got := getVoiceExt(tt.contentType); got != tt.want {
+				t.Fatalf("getVoiceExt(%q) = %q, want %q", tt.contentType, got, tt.want)
+			}
+		})
+	}
+}

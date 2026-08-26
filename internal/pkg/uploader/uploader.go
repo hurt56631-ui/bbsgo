@@ -2,12 +2,12 @@ package uploader
 
 import (
 	"io"
-
-	"bbs-go/internal/models/dto"
-	"bbs-go/internal/pkg/config"
 	"mime"
 	"strings"
 	"time"
+
+	"bbs-go/internal/models/dto"
+	"bbs-go/internal/pkg/config"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/mlogclub/simple/common/dates"
@@ -18,6 +18,7 @@ import (
 var (
 	imagePrefix      = "images"
 	attachmentPrefix = "attachments"
+	voicePrefix      = "voice"
 )
 
 // PutOptions 对象上传时的可选参数；nil 表示不设置。
@@ -62,6 +63,15 @@ func GenerateAttachmentKey(uuid, ext string) string {
 	return generateKeyWithPrefix(attachmentPrefix, uuid, ext)
 }
 
+// GenerateVoiceKeyByContentType 生成语音消息 key（UUID + 音频扩展名）。
+func GenerateVoiceKeyByContentType(contentType string) string {
+	ext := getVoiceExt(contentType)
+	if strs.IsBlank(ext) {
+		ext = ".webm"
+	}
+	return generateKeyWithPrefix(voicePrefix, strs.UUID(), ext)
+}
+
 // NormalizeImageContentType 空时返回 image/jpeg，便于统一默认。
 func NormalizeImageContentType(ct string) string {
 	if strs.IsBlank(ct) {
@@ -87,6 +97,29 @@ func generateKeyWithPrefix(prefix string, filename, ext string) string {
 	}
 	cleanPrefix := strings.Trim(strings.TrimSpace(prefix), "/")
 	return cleanPrefix + "/" + datePath + filename + ext
+}
+
+func getVoiceExt(contentType string) string {
+	if strs.IsBlank(contentType) {
+		return ""
+	}
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "audio/webm":
+		return ".webm"
+	case "audio/ogg", "application/ogg":
+		return ".ogg"
+	case "audio/mp4", "audio/x-m4a":
+		return ".m4a"
+	case "audio/aac", "audio/aacp":
+		return ".aac"
+	case "audio/mpeg":
+		return ".mp3"
+	case "audio/wav", "audio/x-wav":
+		return ".wav"
+	default:
+		return ""
+	}
 }
 
 func getImageExt(contentType string) string {
