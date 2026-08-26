@@ -115,6 +115,19 @@ export interface TopicVote {
   options?: TopicVoteOption[]
 }
 
+
+export interface TopicReadProgress {
+  topicId?: EntityId
+  lastCommentId?: number
+  readCommentCount?: number
+  anchorCommentId?: number
+  anchorOffsetDp?: number
+  /** Basis points from 0..10000. */
+  scrollProgress?: number
+  scrollPercent?: number
+  lastReadTime?: number
+}
+
 export interface Topic {
   id: EntityId
   type?: number
@@ -142,6 +155,7 @@ export interface Topic {
   status?: number
   vote?: TopicVote | null
   acceptedCommentId?: number
+  readProgress?: TopicReadProgress | null
 }
 
 export interface TopicHideContent {
