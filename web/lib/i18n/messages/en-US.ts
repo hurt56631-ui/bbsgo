@@ -1016,6 +1016,23 @@ const enUS = {
       switchConfirm:
         "Switching to {mode} will clear the current content. Continue?",
     },
+    voice: {
+      message: "Voice message",
+      play: "Play voice message",
+      pause: "Pause voice message",
+      record: "Record voice",
+      stop: "Stop",
+      cancel: "Cancel",
+      recording: "Recording",
+      remove: "Remove voice message",
+      unsupported: "Voice recording is not supported in this browser",
+      permissionDenied: "Microphone access failed. Check your browser permissions",
+      httpsRequired: "Voice recording requires HTTPS",
+      stopBeforeSend: "Stop recording before sending",
+      maxDuration: "Up to 60 seconds",
+      recordFailed: "Recording failed. Please try again",
+      tooShort: "The recording is too short. Please record again",
+    },
     textEditor: {
       placeholder: "Write your content",
       publish: "Publish",
