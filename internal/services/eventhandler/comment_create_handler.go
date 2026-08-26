@@ -12,6 +12,7 @@ import (
 	"bbs-go/internal/services"
 	"log/slog"
 	"reflect"
+	"strings"
 
 	"github.com/spf13/cast"
 )
@@ -176,7 +177,7 @@ func handleReplyMsg(comment *models.Comment, commentMsg *CommentMsg) {
 	var (
 		title          = commentMsg.msgTitle()
 		content        = commentMsg.msgContent()
-		repliedContent = common.GetSummary(commentMsg.ParentComment.ContentType, commentMsg.ParentComment.Content)
+		repliedContent = commentNotificationSummary(commentMsg.ParentComment.ContentType, commentMsg.ParentComment.Content)
 	)
 
 	services.MessageService.SendMsg(from, to, msg.TypeCommentReply, title, content, repliedContent,
@@ -200,7 +201,7 @@ func handleQuoteMsg(comment *models.Comment, commentMsg *CommentMsg) {
 		to             = commentMsg.QuoteComment.UserId
 		title          = commentMsg.msgTitle()
 		content        = commentMsg.msgContent()
-		repliedContent = common.GetSummary(commentMsg.QuoteComment.ContentType, commentMsg.QuoteComment.Content)
+		repliedContent = commentNotificationSummary(commentMsg.QuoteComment.ContentType, commentMsg.QuoteComment.Content)
 	)
 
 	if from == to {
@@ -320,7 +321,38 @@ func (c *CommentMsg) msgTitle() string {
 
 // msgContent 回复内容
 func (c *CommentMsg) msgContent() string {
-	return common.GetSummary(c.Comment.ContentType, c.Comment.Content)
+	return commentNotificationSummary(c.Comment.ContentType, c.Comment.Content)
+}
+
+func commentNotificationSummary(contentType constants.ContentType, content string) string {
+	text, hasVoice := stripTrailingVoiceMarker(content)
+	if !hasVoice {
+		return common.GetSummary(contentType, content)
+	}
+	if strings.TrimSpace(text) == "" {
+		return locales.Get("message.voice_message")
+	}
+	return common.GetSummary(contentType, text)
+}
+
+func stripTrailingVoiceMarker(content string) (string, bool) {
+	lines := strings.Split(content, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "voice:") {
+			return content, false
+		}
+		value := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(line, "voice:"), "|", 2)[0])
+		if value == "" {
+			return content, false
+		}
+		lines = append(lines[:i], lines[i+1:]...)
+		return strings.TrimSpace(strings.Join(lines, "\n")), true
+	}
+	return content, false
 }
 
 // msgRepliedContent 被回复的内容
