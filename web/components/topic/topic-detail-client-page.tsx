@@ -11,6 +11,7 @@ import { TopicContent } from "@/components/topic/topic-content"
 import { TopicDetailActions } from "@/components/topic/topic-detail-actions"
 import { TopicHideContentLive } from "@/components/topic/topic-hide-content-live"
 import { TopicMeta } from "@/components/topic/topic-meta"
+import { TopicReadProgressManager } from "@/components/topic/topic-read-progress"
 import { TopicSideActionBar } from "@/components/topic/topic-side-action-bar"
 import { TopicTags } from "@/components/topic/topic-tags"
 import { TopicToc } from "@/components/topic/topic-toc"
@@ -143,7 +144,13 @@ export function TopicDetailClientPage({
       containerClassName="side-size-360"
       asideClassName="!h-auto self-stretch"
     >
-      <div className="main-content no-padding no-bg space-y-4">
+      <TopicReadProgressManager
+        topicId={topic.id}
+        userId={currentUser?.id}
+        initialProgress={topic.readProgress}
+      >
+        {({ restoreAnchorCommentId }) => (
+          <div className="main-content no-padding no-bg space-y-4">
         {topic.status === 2 ? (
           <div className="my-5 w-full rounded-md border border-amber-300 bg-amber-100 px-4 py-3 text-amber-800">
             {t("pages.topic.detail.pending")}
@@ -199,8 +206,11 @@ export function TopicDetailClientPage({
           allowAcceptAnswer={canAcceptAnswer}
           initialData={comments}
           ownerUserId={topic.user?.id}
+          restoreAnchorCommentId={restoreAnchorCommentId}
         />
-      </div>
+          </div>
+        )}
+      </TopicReadProgressManager>
     </MainShell>
   )
 }

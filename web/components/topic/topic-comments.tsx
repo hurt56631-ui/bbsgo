@@ -14,6 +14,7 @@ export function TopicComments({
   allowAcceptAnswer,
   initialData,
   ownerUserId,
+  restoreAnchorCommentId = 0,
 }: {
   entityId: EntityId
   commentCount?: number
@@ -22,6 +23,7 @@ export function TopicComments({
   allowAcceptAnswer?: boolean
   initialData?: PageData<Comment>
   ownerUserId?: EntityId
+  restoreAnchorCommentId?: number
 }) {
   const onCreated = React.useCallback(
     () => window.dispatchEvent(new Event(topicCommentCreatedEvent(entityId))),
@@ -39,6 +41,7 @@ export function TopicComments({
       initialData={initialData}
       onCreated={onCreated}
       ownerUserId={ownerUserId}
+      restoreAnchorCommentId={restoreAnchorCommentId}
     />
   )
 }

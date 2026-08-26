@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useSearchParams } from "react-router-dom"
 
+import { useCurrentUser } from "@/components/app/app-provider"
 import { EmptyState } from "@/components/common/empty-state"
 import { LoadMore } from "@/components/common/load-more"
 import { HomeAside } from "@/components/layout/home-aside"
@@ -41,6 +42,7 @@ export function TopicTagClientPage({
   initialData?: TopicListInitialData
 }) {
   const tagId = useRouteSegment(2)
+  const currentUser = useCurrentUser()
   const { t } = useI18n()
   const load = React.useCallback(
     () => apiFetch<Tag>(`/api/tag/${tagId}`).catch(() => ({ id: 0, name: "" })),
@@ -67,6 +69,7 @@ export function TopicTagClientPage({
               initialHasMore={initialData?.topics?.hasMore || false}
               initialLoad={!initialData?.topics}
               autoLoadOnScroll
+              persistenceKey={`topic-tag:${currentUser?.id || "guest"}:${tagId}`}
               resetKey={`topic-tag:${tagId}`}
               labels={labels}
               loadPage={({ cursor }) =>
@@ -98,6 +101,7 @@ export function NodeTopicClientPage({
 }) {
   const id = useRouteSegment(2)
   const categoryId = resolveCategoryId(id)
+  const currentUser = useCurrentUser()
   const [searchParams, setSearchParams] = useSearchParams()
   const { t } = useI18n()
   const load = React.useCallback(
@@ -257,6 +261,7 @@ export function NodeTopicClientPage({
               initialHasMore={initialData?.topics?.hasMore || false}
               initialLoad={!initialData?.topics}
               autoLoadOnScroll
+              persistenceKey={`topic-category:${currentUser?.id || "guest"}:${categoryId}:${currentNode?.type || ""}:${currentFilterValue}`}
               resetKey={`category:${categoryId}:${currentNode?.type || ""}:${currentFilterValue}`}
               labels={labels}
               loadPage={({ cursor }) =>
