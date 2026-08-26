@@ -57,6 +57,10 @@ function isTangSengVoiceSource(value: string) {
 export function resolveVoiceSource(value: string) {
   const source = normalizeStoredVoiceSource(value)
   if (!source) return ""
+
+  // TangSeng forum voice files always use the same-origin playback proxy. It
+  // fixes upstream MIME/Range headers and avoids cross-origin media quirks. The
+  // server has a project default for api.886.best but remains overridable.
   if (isTangSengVoiceSource(source)) {
     return `/api/upload/voice/preview?src=${encodeURIComponent(source)}`
   }

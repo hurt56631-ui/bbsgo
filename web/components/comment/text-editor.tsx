@@ -26,16 +26,16 @@ const VOICE_MAX_SECONDS = 60
 const VOICE_MIN_SECONDS = 0.7
 const VOICE_AUDIO_BITS_PER_SECOND = 24_000
 const VOICE_MIME_TYPES = [
-  // The Android forum recorder uses MPEG-4/AAC at 24 kbps / 16 kHz. Prefer
-  // the same container/codec when the browser supports it, then fall back to
-  // Opus containers on Chromium/Firefox.
+  // Record in the browser's most mature native format. The server normalizes
+  // every web recording to the same MPEG-4/AAC format used by the Android app
+  // before it is stored, so Chrome does not need experimental MP4 recording.
+  "audio/webm;codecs=opus",
+  "audio/ogg;codecs=opus",
   "audio/mp4;codecs=mp4a.40.2",
   "audio/mp4",
-  "audio/aac",
-  "audio/webm;codecs=opus",
   "audio/webm",
-  "audio/ogg;codecs=opus",
   "audio/ogg",
+  "audio/aac",
 ] as const
 
 function imageSrc(image: ImageInfo) {
