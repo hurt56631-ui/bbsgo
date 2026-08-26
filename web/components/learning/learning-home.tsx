@@ -38,9 +38,9 @@ const quickTools = [
 
 const studyCards = [
   {
-    title: "词汇",
+    title: "单词",
     subtitle: "စကားလုံး",
-    description: "高频词汇 · 分级学习",
+    description: "拼音 · 例句 · 笔顺 · 跟读",
     href: "/words",
     icon: LanguagesIcon,
     cardClass:
@@ -51,13 +51,13 @@ const studyCards = [
   {
     title: "实用短句",
     subtitle: "အသုံးဝင် စကားစုများ",
-    description: "1万句 · 日常口语",
+    description: "场景 · 拆解 · 表达 · 跟读",
     href: "/phrases",
     icon: MessageCircle,
     cardClass:
       "bg-[linear-gradient(145deg,#eaf8f2_0%,#f5fbf8_52%,#e5f5ee_100%)] border-[#d5eee2]",
     iconClass: "text-[#238f72]",
-    badge: "10,000",
+    badge: "PHRASES",
   },
 ] as const
 
