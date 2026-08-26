@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"image"
 	_ "image/gif"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"strings"
 	"time"
@@ -28,12 +30,13 @@ import (
 )
 
 const (
-	maxImageDimension   = 16000
-	maxImagePixels      = 64_000_000
-	multipartOverhead   = 1 << 20
-	mimeSniffBytes      = 512
-	voiceUploadMaxMB    = 5
-	voiceUploadMaxBytes = voiceUploadMaxMB * 1024 * 1024
+	maxImageDimension          = 16000
+	maxImagePixels             = 64_000_000
+	multipartOverhead          = 1 << 20
+	mimeSniffBytes             = 512
+	voiceUploadMaxMB           = 5
+	voiceUploadMaxBytes        = voiceUploadMaxMB * 1024 * 1024
+	defaultTangSengVoiceAPIURL = "https://api.886.best"
 )
 
 var allowedImageTypes = map[string]struct{}{
@@ -135,19 +138,43 @@ func UploadVoiceHandle(ctx *gin.Context) {
 		return
 	}
 
-	contentType, err := validateUploadedVoiceStream(file)
+	inputContentType, err := validateUploadedVoiceStream(file)
 	if err != nil {
 		ginx.WriteJSON(ctx, ginx.ErrorMessage(err.Error()))
 		return
 	}
 
+	// Browser MediaRecorder output differs by platform (WebM/Opus on Chromium,
+	// MP4/AAC on Safari). Normalize every web recording to the exact format used
+	// by the Android forum recorder: MPEG-4/AAC, mono, 16 kHz, 24 kbps. This is
+	// what makes one stored voice object playable by both web and Android instead
+	// of relying on OEM-specific WebM decoder support.
+	converted, convertedSize, cleanup, err := transcodeVoiceToAppM4A(
+		ctx.Request.Context(), file, inputContentType,
+	)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		slog.Warn("transcode voice failed",
+			slog.String("filename", header.Filename),
+			slog.String("contentType", inputContentType),
+			slog.Any("err", err),
+		)
+		ginx.WriteJSON(ctx, ginx.ErrorMessage(locales.Get("upload.voice_convert_failed")))
+		return
+	}
+
+	const storedContentType = "audio/mp4"
 	slog.Info("upload voice",
 		slog.String("filename", header.Filename),
-		slog.Int64("size", header.Size),
-		slog.String("contentType", contentType),
+		slog.Int64("sourceSize", header.Size),
+		slog.Int64("storedSize", convertedSize),
+		slog.String("sourceContentType", inputContentType),
+		slog.String("storedContentType", storedContentType),
 	)
 
-	voiceURL, err := services.UploadService.PutVoiceStream(file, header.Size, contentType)
+	voiceURL, err := services.UploadService.PutVoiceStream(converted, convertedSize, storedContentType)
 	if err != nil {
 		ginx.WriteJSON(ctx, err)
 		return
@@ -157,9 +184,124 @@ func UploadVoiceHandle(ctx *gin.Context) {
 		// the canonical forum URL when baseURL is configured so web-created voice
 		// comments are portable to the app instead of persisting /res/... paths.
 		"url":         absoluteVoicePublicURL(services.SysConfigService.GetBaseURL(), voiceURL),
-		"contentType": contentType,
-		"size":        header.Size,
+		"contentType": storedContentType,
+		"size":        convertedSize,
 	})
+}
+
+func transcodeVoiceToAppM4A(ctx context.Context, source io.ReadSeeker, sourceContentType string) (io.ReadSeeker, int64, func(), error) {
+	if source == nil {
+		return nil, 0, nil, errors.New("empty voice source")
+	}
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		return nil, 0, nil, errors.New("ffmpeg is not installed")
+	}
+	if _, err := source.Seek(0, io.SeekStart); err != nil {
+		return nil, 0, nil, err
+	}
+
+	inputExt := voiceTempExtension(sourceContentType)
+	input, err := os.CreateTemp("", "bbsgo-voice-in-*"+inputExt)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	inputPath := input.Name()
+	output, err := os.CreateTemp("", "bbsgo-voice-out-*.m4a")
+	if err != nil {
+		_ = input.Close()
+		_ = os.Remove(inputPath)
+		return nil, 0, nil, err
+	}
+	outputPath := output.Name()
+	_ = output.Close()
+	cleanup := func() {
+		_ = input.Close()
+		_ = os.Remove(inputPath)
+		_ = os.Remove(outputPath)
+	}
+
+	if _, err := io.Copy(input, io.LimitReader(source, voiceUploadMaxBytes)); err != nil {
+		cleanup()
+		return nil, 0, nil, err
+	}
+	if err := input.Close(); err != nil {
+		cleanup()
+		return nil, 0, nil, err
+	}
+
+	// -t is a server-side guard as well as a UX rule. Even a forged client cannot
+	// make the transcoder process a long recording just because it fits under 5 MB.
+	cmd := exec.CommandContext(ctx, "ffmpeg",
+		"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+		"-i", inputPath,
+		"-t", "60",
+		"-vn", "-map_metadata", "-1",
+		"-ac", "1", "-ar", "16000",
+		"-c:a", "aac", "-b:a", "24k",
+		"-movflags", "+faststart",
+		outputPath,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		cleanup()
+		return nil, 0, nil, errors.New(strings.TrimSpace(string(out)))
+	}
+
+	converted, err := os.Open(outputPath)
+	if err != nil {
+		cleanup()
+		return nil, 0, nil, err
+	}
+	stat, err := converted.Stat()
+	if err != nil || stat.Size() <= 0 || stat.Size() > voiceUploadMaxBytes {
+		_ = converted.Close()
+		cleanup()
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		return nil, 0, nil, errors.New("invalid converted voice size")
+	}
+
+	// Verify that ffmpeg produced an MP4-family container before handing it to
+	// storage. This catches a broken/misconfigured transcoder early.
+	header := make([]byte, 16)
+	n, readErr := io.ReadFull(converted, header)
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		_ = converted.Close()
+		cleanup()
+		return nil, 0, nil, readErr
+	}
+	if detectVoiceContentType(header[:n]) != "audio/mp4" {
+		_ = converted.Close()
+		cleanup()
+		return nil, 0, nil, errors.New("ffmpeg did not produce m4a")
+	}
+	if _, err := converted.Seek(0, io.SeekStart); err != nil {
+		_ = converted.Close()
+		cleanup()
+		return nil, 0, nil, err
+	}
+
+	return converted, stat.Size(), func() {
+		_ = converted.Close()
+		cleanup()
+	}, nil
+}
+
+func voiceTempExtension(contentType string) string {
+	switch strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0])) {
+	case "audio/mp4":
+		return ".m4a"
+	case "audio/aac":
+		return ".aac"
+	case "audio/ogg":
+		return ".ogg"
+	case "audio/mpeg":
+		return ".mp3"
+	case "audio/wav":
+		return ".wav"
+	default:
+		return ".webm"
+	}
 }
 
 func absoluteVoicePublicURL(baseURL, raw string) string {
@@ -195,16 +337,25 @@ func VoicePreviewHandle(ctx *gin.Context) {
 		ctx.Status(http.StatusBadRequest)
 		return
 	}
-	endpoint, err := tangSengVoicePreviewURL(os.Getenv("BBSGO_TANGSENG_API_URL"), objectPath)
+	apiBase := strings.TrimSpace(os.Getenv("BBSGO_TANGSENG_API_URL"))
+	if apiBase == "" {
+		apiBase = defaultTangSengVoiceAPIURL
+	}
+	endpoint, err := tangSengVoicePreviewURL(apiBase, objectPath)
 	if err != nil {
 		ctx.Status(http.StatusNotFound)
 		return
 	}
-	req, err := http.NewRequestWithContext(ctx.Request.Context(), http.MethodGet, endpoint, nil)
+	method := http.MethodGet
+	if ctx.Request.Method == http.MethodHead {
+		method = http.MethodHead
+	}
+	req, err := http.NewRequestWithContext(ctx.Request.Context(), method, endpoint, nil)
 	if err != nil {
 		ctx.Status(http.StatusBadGateway)
 		return
 	}
+	req.Header.Set("Accept-Encoding", "identity")
 	if rangeHeader := strings.TrimSpace(ctx.GetHeader("Range")); rangeHeader != "" {
 		req.Header.Set("Range", rangeHeader)
 	}
@@ -226,7 +377,9 @@ func VoicePreviewHandle(ctx *gin.Context) {
 	}
 	ctx.Header("Content-Disposition", "inline")
 	ctx.Status(resp.StatusCode)
-	_, _ = io.Copy(ctx.Writer, resp.Body)
+	if method != http.MethodHead {
+		_, _ = io.Copy(ctx.Writer, resp.Body)
+	}
 }
 
 func voicePreviewContentType(contentType, objectPath string) string {
