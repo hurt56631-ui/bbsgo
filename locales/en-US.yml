@@ -201,6 +201,7 @@ upload:
   empty_voice: "Voice file is empty"
   invalid_voice_data: "Invalid voice data"
   unsupported_voice_format: "Unsupported voice format"
+  voice_convert_failed: "Voice conversion failed. Please try again."
 
 attachment:
   not_found: "Attachment not found or unavailable"

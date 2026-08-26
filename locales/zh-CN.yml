@@ -201,6 +201,7 @@ upload:
   empty_voice: "语音文件为空"
   invalid_voice_data: "语音数据无效"
   unsupported_voice_format: "不支持该语音格式"
+  voice_convert_failed: "语音转码失败，请重试"
 
 attachment:
   not_found: "附件不存在或已下架"
