@@ -198,11 +198,29 @@ function voiceExtension(contentType: string) {
 function absoluteVoiceUrl(value: string) {
   const raw = String(value || "").trim()
   if (!raw) return ""
-  if (/^https?:\/\//i.test(raw)) return raw
   if (typeof window === "undefined") return raw
-  if (raw.startsWith("//")) return `${window.location.protocol}${raw}`
-  const path = raw.startsWith("/") ? raw : `/${raw}`
-  return new URL(path, window.location.origin).toString()
+
+  try {
+    const parsed = new URL(raw, window.location.origin)
+    // Local forum voice objects must use the public origin that the browser is
+    // actually visiting. A stale/internal backend baseURL (localhost, container
+    // host, an old domain, http instead of https, etc.) must never be persisted
+    // into the cross-platform voice payload because Android will later request it
+    // literally. External OSS/COS/S3 URLs do not use /res/uploads/voice and are
+    // intentionally left untouched.
+    if (
+      parsed.pathname.startsWith("/res/uploads/voice/") ||
+      parsed.pathname.startsWith("/res/uploads/test/voice/")
+    ) {
+      return new URL(`${parsed.pathname}${parsed.search}`, window.location.origin).toString()
+    }
+    if (/^https?:\/\//i.test(raw)) return parsed.toString()
+    if (raw.startsWith("//")) return `${window.location.protocol}${raw}`
+    return parsed.toString()
+  } catch {
+    const path = raw.startsWith("/") ? raw : `/${raw}`
+    return new URL(path, window.location.origin).toString()
+  }
 }
 
 export async function uploadCommunityVoice(blob: Blob) {
