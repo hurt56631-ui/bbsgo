@@ -106,3 +106,23 @@ func TestVoicePreviewContentType(t *testing.T) {
 		}
 	}
 }
+
+func TestAbsoluteVoicePublicURL(t *testing.T) {
+	tests := []struct {
+		name string
+		base string
+		raw  string
+		want string
+	}{
+		{name: "local voice", base: "https://forum.example.com", raw: "/res/uploads/voice/2026/a.m4a", want: "https://forum.example.com/res/uploads/voice/2026/a.m4a"},
+		{name: "already absolute", base: "https://forum.example.com", raw: "https://cdn.example.com/voice/a.m4a", want: "https://cdn.example.com/voice/a.m4a"},
+		{name: "invalid base falls back", base: "/", raw: "/res/uploads/voice/a.webm", want: "/res/uploads/voice/a.webm"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := absoluteVoicePublicURL(tt.base, tt.raw); got != tt.want {
+				t.Fatalf("absoluteVoicePublicURL(%q, %q) = %q, want %q", tt.base, tt.raw, got, tt.want)
+			}
+		})
+	}
+}

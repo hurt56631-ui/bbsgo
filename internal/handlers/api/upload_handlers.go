@@ -153,10 +153,33 @@ func UploadVoiceHandle(ctx *gin.Context) {
 		return
 	}
 	ginx.WriteJSON(ctx, map[string]any{
-		"url":         voiceURL,
+		// Android's forum voice protocol accepts an absolute HTTP(S) path. Return
+		// the canonical forum URL when baseURL is configured so web-created voice
+		// comments are portable to the app instead of persisting /res/... paths.
+		"url":         absoluteVoicePublicURL(services.SysConfigService.GetBaseURL(), voiceURL),
 		"contentType": contentType,
 		"size":        header.Size,
 	})
+}
+
+func absoluteVoicePublicURL(baseURL, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if parsed, err := url.Parse(raw); err == nil && parsed.Host != "" &&
+		(parsed.Scheme == "http" || parsed.Scheme == "https") {
+		return parsed.String()
+	}
+	base, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || base.Host == "" || (base.Scheme != "http" && base.Scheme != "https") {
+		return raw
+	}
+	reference, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	return base.ResolveReference(reference).String()
 }
 
 // VoicePreviewHandle proxies legacy Android/TangSeng forum voice objects.
