@@ -1,5 +1,6 @@
 import { useLoaderData } from "react-router"
 
+import { useCurrentUser } from "@/components/app/app-provider"
 import { EmptyState } from "@/components/common/empty-state"
 import { LoadMore } from "@/components/common/load-more"
 import { LearningHome } from "@/components/learning/learning-home"
@@ -31,6 +32,7 @@ export function meta({
 
 export function TopicListRoute({ title }: { title?: string }) {
   const { topics } = useLoaderData() as TopicListRouteData
+  const currentUser = useCurrentUser()
   const { t } = useI18n()
 
   return (
@@ -49,6 +51,7 @@ export function TopicListRoute({ title }: { title?: string }) {
               initialHasMore={topics.hasMore}
               initialLoad={false}
               autoLoadOnScroll
+              persistenceKey={`topic-home:${currentUser?.id || "guest"}`}
               resetKey="/api/topic/topics"
               labels={{
                 loadMore: t("common.loadMore.loadMore"),
