@@ -3,13 +3,11 @@
 import * as React from "react"
 import {
   ArrowLeft,
-  BookOpenText,
   ChevronRight,
   Heart,
   Mic,
   Pencil,
   Play,
-  RotateCcw,
   Volume2,
 } from "lucide-react"
 
@@ -30,10 +28,8 @@ import {
 
 const FAVORITES_KEY = "talkami.learning.words.favorites.v2"
 const SETTINGS_KEY = "talkami.learning.words.settings.v2"
-const RATINGS_KEY = "talkami.learning.words.ratings.v2"
 const POSITION_KEY = "talkami.learning.words.position.v2"
 
-type Rating = "again" | "hard" | "good" | "easy"
 type Settings = { showPinyin: boolean; showPhonetic: boolean; autoRead: boolean }
 type PositionMap = Record<string, { index: number; itemId?: string }>
 
@@ -112,7 +108,6 @@ export function WordsPage() {
   const [index, setIndex] = React.useState(0)
   const [front, setFront] = React.useState(true)
   const [favorites, setFavorites] = React.useState<WordItem[]>([])
-  const [ratings, setRatings] = React.useState<Record<string, Rating>>({})
   const [positions, setPositions] = React.useState<PositionMap>({})
   const [settings, setSettings] = React.useState<Settings>(defaultSettings)
   const [recordingTarget, setRecordingTarget] = React.useState("")
@@ -120,12 +115,10 @@ export function WordsPage() {
   const touchStart = React.useRef<TouchPoint | null>(null)
   const studyScrollRef = React.useRef<HTMLDivElement | null>(null)
   const ignoreClick = React.useRef(false)
-  const actionLock = React.useRef(false)
   const packAbort = React.useRef<AbortController | null>(null)
 
   React.useEffect(() => {
     setFavorites(readStorage<WordItem[]>(FAVORITES_KEY, []))
-    setRatings(readStorage<Record<string, Rating>>(RATINGS_KEY, {}))
     setPositions(readStorage<PositionMap>(POSITION_KEY, {}))
     setSettings({
       ...defaultSettings,
@@ -303,32 +296,6 @@ export function WordsPage() {
     }
   }
 
-  function commitRating(rating: Rating) {
-    if (!current || actionLock.current) return
-    actionLock.current = true
-    window.setTimeout(() => {
-      actionLock.current = false
-    }, 220)
-    if (rating !== "again" && front) {
-      setFront(false)
-      return
-    }
-    const nextRatings = { ...ratings, [currentKey]: rating }
-    setRatings(nextRatings)
-    writeStorage(RATINGS_KEY, nextRatings)
-
-    if (rating === "again" && items.length > 1) {
-      setItems((previous) => {
-        const next = [...previous]
-        const insertAt = Math.min(index + 3, next.length)
-        next.splice(insertAt, 0, current)
-        return next
-      })
-    }
-    setIndex((value) => value + 1)
-    setFront(true)
-  }
-
   function move(delta: number) {
     if (!items.length) return
     const next = Math.max(0, Math.min(items.length - 1, index + delta))
@@ -369,11 +336,6 @@ export function WordsPage() {
         handled = true
         move(dy < 0 ? 1 : -1)
       }
-    } else if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.2) {
-      handled = true
-      if (dx < 0) commitRating("again")
-      else if (front) setFront(false)
-      else commitRating("good")
     }
 
     if (handled) {
@@ -384,26 +346,10 @@ export function WordsPage() {
     }
   }
 
-  if (items.length && index >= items.length) {
-    return (
-      <div className="min-h-[72vh] bg-[#f5f6fa] px-4 py-8 text-[#1b2130]">
-        <div className="mx-auto max-w-xl rounded-[30px] bg-white p-8 text-center shadow-[0_18px_50px_rgba(42,49,78,.1)]">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#efedff] text-[#655ce8]"><BookOpenText className="h-8 w-8" /></div>
-          <h2 className="mt-4 text-2xl font-black">本组练习完成</h2>
-          <p className="mt-2 text-sm text-[#818897]">完成 {items.length} 张学习卡，本地进度已经保存。</p>
-          <div className="mt-6 flex justify-center gap-2">
-            <button type="button" onClick={() => { setIndex(0); setFront(true) }} className="inline-flex h-11 items-center gap-2 rounded-full bg-[#655ce8] px-5 text-sm font-black text-white"><RotateCcw className="h-4 w-4" />再练一遍</button>
-            <button type="button" onClick={leavePack} className="h-11 rounded-full bg-[#f1f2f5] px-5 text-sm font-black text-[#626a79]">返回词库</button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   if (current) {
     return (
-      <div data-learning-fullscreen className="fixed inset-0 z-[100] h-[100dvh] overflow-hidden bg-[#f3f4f8] text-[#181d2a]">
-        <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-[max(6px,env(safe-area-inset-top))] sm:px-5">
+      <div data-learning-fullscreen className="fixed inset-0 z-[100] h-[100dvh] overflow-hidden bg-[#edf0f6] text-[#181d2a]">
+        <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-[max(6px,env(safe-area-inset-top))] sm:px-5">
           <header className="flex h-12 shrink-0 items-center gap-2">
             <button type="button" onClick={leavePack} className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#586171] shadow-sm" aria-label="返回"><ArrowLeft className="h-5 w-5" /></button>
             <div className="min-w-0 flex-1 text-center">
@@ -427,11 +373,11 @@ export function WordsPage() {
             }}
             onTouchStart={onTouchStart}
             onTouchEnd={onTouchEnd}
-            className={`relative mt-1 min-h-0 flex-1 rounded-[30px] border border-white bg-white text-left shadow-[0_18px_55px_rgba(53,60,91,.13)] ${front ? "touch-none overflow-hidden" : "touch-pan-y overflow-y-auto overscroll-contain"}`}
+            className={`relative mt-1 min-h-0 flex-1 rounded-[32px] border border-[#ded8ff] bg-[linear-gradient(155deg,#f0ecff_0%,#f8f6ff_50%,#edf4ff_100%)] text-left shadow-[0_20px_60px_rgba(53,60,91,.15)] ${front ? "touch-none overflow-hidden" : "touch-pan-y overflow-y-auto overscroll-contain"}`}
           >
             {front ? (
               <div className="flex h-full min-h-full flex-col items-center justify-center px-6 py-8 text-center">
-                <p className="absolute inset-x-0 top-6 text-center text-[11px] font-bold text-[#abb0bb]">上滑下一词 · 下滑上一词 · 点击翻面 · 左滑不认识 · 右滑看答案</p>
+                <p className="absolute inset-x-0 top-6 text-center text-[11px] font-bold text-[#abb0bb]">上滑下一词 · 下滑上一词 · 点击翻面</p>
                 <h1 className="text-[58px] font-black leading-tight tracking-tight sm:text-[70px]">{current.word}</h1>
                 {settings.showPinyin && current.pinyin ? <p className="mt-3 text-[22px] font-semibold text-[#4b7fc8]">{current.pinyin}</p> : null}
                 {settings.showPhonetic && current.phoneticMy ? <p className="mt-2 text-lg font-black text-[#bb7818]">{current.phoneticMy}</p> : null}
@@ -474,13 +420,6 @@ export function WordsPage() {
             )}
           </div>
 
-          <div className="mt-3 grid grid-cols-4 gap-2">
-            <button type="button" onClick={() => commitRating("again")} className="h-12 rounded-2xl bg-[#ffe9ed] text-sm font-black text-[#d74d63]">不认识</button>
-            <button type="button" onClick={() => commitRating("hard")} className="h-12 rounded-2xl bg-[#fff0d8] text-sm font-black text-[#bd7610]">模糊</button>
-            <button type="button" onClick={() => commitRating("good")} className="h-12 rounded-2xl bg-[#e2f7ec] text-sm font-black text-[#27845e]">认识</button>
-            <button type="button" onClick={() => commitRating("easy")} className="h-12 rounded-2xl bg-[#e9edff] text-sm font-black text-[#5f58d9]">简单</button>
-          </div>
-          <p className="mx-auto mt-2 text-[10px] font-bold text-[#9aa0ac]">上滑下一词 · 下滑上一词</p>
         </div>
 
         <HanziStrokeModal open={Boolean(strokeTarget)} word={strokeTarget?.word || ""} pinyin={strokeTarget?.pinyin || ""} onClose={() => setStrokeTarget(null)} />

@@ -1,36 +1,33 @@
 "use client"
 
-import * as React from "react"
+import { useCurrentUser } from "@/components/app/app-provider"
 import Link from "@/components/common/link"
+import { useI18n } from "@/lib/i18n/provider"
 import {
   BookOpenIcon,
   ChevronRight,
   LanguagesIcon,
   ListChecks,
-  Menu,
   MessageCircle,
 } from "lucide-react"
 
 const quickTools = [
   {
-    title: "拼音",
-    subtitle: "ပင်းယင်း",
+    key: "pinyin",
     href: "/pinyin",
     icon: LanguagesIcon,
     iconClass: "text-[#735fe8]",
     iconBg: "bg-[#eee9ff]",
   },
   {
-    title: "书籍",
-    subtitle: "စာအုပ်များ",
+    key: "books",
     href: "/books",
     icon: BookOpenIcon,
     iconClass: "text-[#2d8c72]",
     iconBg: "bg-[#e7f6ef]",
   },
   {
-    title: "练习题",
-    subtitle: "လေ့ကျင့်ခန်း",
+    key: "exercises",
     href: "/exercises",
     icon: ListChecks,
     iconClass: "text-[#d9794c]",
@@ -40,156 +37,161 @@ const quickTools = [
 
 const studyCards = [
   {
-    title: "单词",
-    subtitle: "စကားလုံး",
-    description: "拼音 · 例句 · 笔顺 · 跟读",
+    key: "words",
     href: "/words",
     icon: LanguagesIcon,
     cardClass:
       "bg-[linear-gradient(145deg,#f2edff_0%,#f8f6ff_52%,#eeeaff_100%)] border-[#e2dcff]",
     iconClass: "text-[#6c5ce7]",
-    badge: "WORDS",
   },
   {
-    title: "实用短句",
-    subtitle: "အသုံးဝင် စကားစုများ",
-    description: "场景 · 拆解 · 表达 · 跟读",
+    key: "phrases",
     href: "/phrases",
     icon: MessageCircle,
     cardClass:
       "bg-[linear-gradient(145deg,#eaf8f2_0%,#f5fbf8_52%,#e5f5ee_100%)] border-[#d5eee2]",
     iconClass: "text-[#238f72]",
-    badge: "PHRASES",
   },
 ] as const
 
-type SiteMenuItem = { href: string; label: string }
+type LearningLocale = "zh-CN" | "en-US" | "my-MM"
+
+type LearningCopy = {
+  eyebrow: string
+  heroTitle: string
+  heroDescription: string
+  start: string
+  login: string
+  register: string
+  quickTitle: string
+  quick: Record<(typeof quickTools)[number]["key"], string>
+  cards: Record<
+    (typeof studyCards)[number]["key"],
+    { title: string; description: string }
+  >
+  community: string
+  all: string
+}
+
+const learningCopy: Record<LearningLocale, LearningCopy> = {
+  "zh-CN": {
+    eyebrow: "中文学习",
+    heroTitle: "每天进步一点点",
+    heroDescription: "用短时间持续学习，把拼音、词汇和表达练扎实。",
+    start: "开始学习",
+    login: "登录",
+    register: "注册",
+    quickTitle: "快捷学习",
+    quick: {
+      pinyin: "拼音",
+      books: "书籍",
+      exercises: "练习题",
+    },
+    cards: {
+      words: { title: "单词", description: "拼音 · 例句 · 笔顺 · 跟读" },
+      phrases: { title: "实用短句", description: "场景 · 拆解 · 表达 · 跟读" },
+    },
+    community: "学习交流",
+    all: "全部",
+  },
+  "en-US": {
+    eyebrow: "LEARN CHINESE",
+    heroTitle: "Make progress every day",
+    heroDescription: "Build solid pinyin, vocabulary, and speaking skills in short daily sessions.",
+    start: "Start learning",
+    login: "Sign in",
+    register: "Sign up",
+    quickTitle: "Quick study",
+    quick: {
+      pinyin: "Pinyin",
+      books: "Books",
+      exercises: "Exercises",
+    },
+    cards: {
+      words: { title: "Words", description: "Pinyin · Examples · Strokes · Shadowing" },
+      phrases: { title: "Useful phrases", description: "Scenes · Breakdown · Usage · Shadowing" },
+    },
+    community: "Learning community",
+    all: "View all",
+  },
+  "my-MM": {
+    eyebrow: "တရုတ်စာ လေ့လာရန်",
+    heroTitle: "နေ့တိုင်း နည်းနည်း တိုးတက်ပါ",
+    heroDescription: "ပင်းယင်း၊ စကားလုံးနဲ့ စကားပြောကို နေ့စဉ် အချိန်တိုတိုနဲ့ လေ့ကျင့်ပါ။",
+    start: "စလေ့လာမည်",
+    login: "ဝင်ရန်",
+    register: "စာရင်းသွင်းရန်",
+    quickTitle: "အမြန်လေ့လာ",
+    quick: {
+      pinyin: "ပင်းယင်း",
+      books: "စာအုပ်များ",
+      exercises: "လေ့ကျင့်ခန်း",
+    },
+    cards: {
+      words: { title: "စကားလုံး", description: "ပင်းယင်း · ဥပမာ · ရေးစဉ် · လိုက်ဖတ်" },
+      phrases: { title: "အသုံးဝင် စကားစုများ", description: "အခြေအနေ · ခွဲခြမ်း · အသုံး · လိုက်ဖတ်" },
+    },
+    community: "လေ့လာရေး ဆွေးနွေးချက်",
+    all: "အားလုံး",
+  },
+}
+
+function resolveLearningLocale(locale: unknown): LearningLocale {
+  const value = String(locale || "zh-CN").toLowerCase()
+  if (value.startsWith("my")) return "my-MM"
+  if (value.startsWith("en")) return "en-US"
+  return "zh-CN"
+}
 
 export function LearningHome() {
-  const [menuOpen, setMenuOpen] = React.useState(false)
-  const [menuItems, setMenuItems] = React.useState<SiteMenuItem[]>([])
-  const siteHeaderRef = React.useRef<HTMLElement | null>(null)
-
-  React.useEffect(() => {
-    const headers = Array.from(document.querySelectorAll<HTMLElement>("header"))
-    const siteHeader = headers.find((header) => !header.closest("[data-learning-home]")) || null
-    if (!siteHeader) return
-
-    siteHeaderRef.current = siteHeader
-    const previousDisplay = siteHeader.style.display
-    const links = Array.from(siteHeader.querySelectorAll<HTMLAnchorElement>("a[href]"))
-      .map((link) => ({
-        href: link.getAttribute("href") || "",
-        label:
-          (link.textContent || "").replace(/\s+/g, " ").trim() ||
-          link.getAttribute("aria-label") ||
-          link.getAttribute("title") ||
-          "",
-      }))
-      .filter((item) => item.href && item.label)
-      .filter((item, index, all) =>
-        all.findIndex((other) => other.href === item.href) === index
-      )
-
-    if (links.length) setMenuItems(links)
-    siteHeader.style.display = "none"
-
-    return () => {
-      siteHeader.style.display = previousDisplay
-      siteHeaderRef.current = null
-    }
-  }, [])
-
-  React.useEffect(() => {
-    if (!menuOpen) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false)
-    }
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = "hidden"
-    document.addEventListener("keydown", onKeyDown)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      document.removeEventListener("keydown", onKeyDown)
-    }
-  }, [menuOpen])
-
-  function toggleSiteMenu() {
-    if (menuItems.length) {
-      setMenuOpen((value) => !value)
-      return
-    }
-
-    const siteHeader = siteHeaderRef.current
-    const trigger = siteHeader?.querySelector<HTMLElement>(
-      'button[aria-label*="菜单"], button[aria-label*="menu" i], [data-menu-trigger], [data-site-menu-trigger]'
-    )
-    trigger?.click()
-  }
+  const user = useCurrentUser()
+  const { locale } = useI18n()
+  const copy = learningCopy[resolveLearningLocale(locale)]
 
   return (
     <div data-learning-home className="relative overflow-hidden bg-[#f7f8fb] text-[#182033]">
       <section className="relative h-[304px] overflow-hidden bg-[#253044] sm:h-[340px]">
         <img
           src="/images/learning-home-hero.webp"
-          alt="中文学习"
+          alt={copy.eyebrow}
           className="absolute inset-0 h-full w-full object-cover object-[center_52%]"
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/5 to-[#17213a]/88" />
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#17213a]/95 to-transparent" />
 
-        <button
-          type="button"
-          onClick={toggleSiteMenu}
-          aria-label={menuOpen ? "关闭菜单" : "打开菜单"}
-          aria-expanded={menuOpen}
-          className="absolute left-4 top-[max(14px,env(safe-area-inset-top))] z-30 flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-black/22 text-white shadow-[0_8px_24px_rgba(0,0,0,.2)] backdrop-blur-md transition active:scale-95 sm:left-6"
-        >
-          <Menu className="h-6 w-6" />
-        </button>
-
-        {menuOpen ? (
-          <>
-            <button
-              type="button"
-              aria-label="关闭菜单"
-              onClick={() => setMenuOpen(false)}
-              className="fixed inset-0 z-40 bg-black/25"
-            />
-            <nav
-              style={{ top: "calc(max(14px, env(safe-area-inset-top)) + 52px)" }}
-              className="absolute left-4 z-50 max-h-[min(70dvh,520px)] w-[min(78vw,300px)] overflow-y-auto rounded-[22px] border border-white/35 bg-[#17213a]/92 p-2 text-white shadow-[0_18px_55px_rgba(0,0,0,.28)] backdrop-blur-xl sm:left-6"
+        {!user ? (
+          <div className="absolute right-4 top-4 z-20 flex items-center gap-2 sm:right-6">
+            <Link
+              href="/user/signin?redirect=%2F"
+              className="inline-flex h-9 items-center rounded-full border border-white/40 bg-black/20 px-4 text-xs font-black text-white backdrop-blur-md transition active:scale-95"
             >
-              {menuItems.map((item) => (
-                <Link
-                  key={`${item.href}-${item.label}`}
-                  href={item.href}
-                  onClick={() => setMenuOpen(false)}
-                  className="block rounded-[16px] px-4 py-3 text-sm font-bold text-white/92 transition-colors hover:bg-white/10 active:bg-white/15"
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
-          </>
+              {copy.login}
+            </Link>
+            <Link
+              href="/user/signup"
+              className="inline-flex h-9 items-center rounded-full bg-white px-4 text-xs font-black text-[#655ce8] shadow-[0_6px_18px_rgba(0,0,0,.15)] transition active:scale-95"
+            >
+              {copy.register}
+            </Link>
+          </div>
         ) : null}
 
         <div className="relative mx-auto flex h-full w-full max-w-[1180px] items-end px-5 pb-[72px] sm:px-7 sm:pb-[78px]">
           <div className="max-w-xl text-white">
-            <p className="text-[10px] font-bold tracking-[0.3em] text-white/75 sm:text-xs">
-              LEARN CHINESE
+            <p className="text-[10px] font-bold tracking-[0.2em] text-white/75 sm:text-xs">
+              {copy.eyebrow}
             </p>
             <h1 className="mt-2 text-[30px] font-black leading-tight drop-shadow-sm sm:text-[36px]">
-              每天进步一点点
+              {copy.heroTitle}
             </h1>
             <p className="mt-2 max-w-[88%] text-[12px] leading-5 text-white/88 sm:max-w-xl sm:text-sm">
-              နေ့တိုင်း နည်းနည်းစီ သင်ယူပြီး တရုတ်စာကို တဖြည်းဖြည်း တိုးတက်ပါ။
+              {copy.heroDescription}
             </p>
             <Link
               href="/pinyin"
               className="mt-4 inline-flex h-10 items-center rounded-full bg-white px-5 text-[13px] font-black text-[#655ce8] shadow-[0_8px_24px_rgba(0,0,0,0.18)] transition-transform active:scale-95"
             >
-              开始学习
+              {copy.start}
               <ChevronRight className="ml-1 h-4 w-4" />
             </Link>
           </div>
@@ -198,23 +200,18 @@ export function LearningHome() {
 
       <section className="relative z-10 -mt-[48px] rounded-t-[32px] border-t border-white/90 bg-[linear-gradient(180deg,#fff8fb_0%,#fffdf9_42%,#f1faf5_100%)] shadow-[0_-12px_40px_rgba(45,55,90,0.13)]">
         <div className="mx-auto w-full max-w-[1180px] px-4 pb-8 pt-6 sm:px-6 sm:pt-7">
-          <div>
-            <h2 className="text-[21px] font-black tracking-tight sm:text-2xl">
-              快捷学习
-            </h2>
-            <p className="mt-1 text-[11px] text-[#7f899a] sm:text-xs">
-              အမြန်စတင်လေ့လာရန်
-            </p>
-          </div>
+          <h2 className="text-[21px] font-black tracking-tight sm:text-2xl">
+            {copy.quickTitle}
+          </h2>
 
           <div className="mt-4 grid grid-cols-3 overflow-hidden rounded-[24px] border border-white/90 bg-white/78 px-1 py-2 shadow-[0_8px_26px_rgba(65,73,112,0.08)] backdrop-blur-xl">
             {quickTools.map((tool, index) => {
               const Icon = tool.icon
               return (
                 <Link
-                  key={tool.title}
+                  key={tool.key}
                   href={tool.href}
-                  className={`relative flex min-h-[92px] flex-col items-center justify-center px-1 py-2 text-center transition-colors active:bg-white/70 ${
+                  className={`relative flex min-h-[86px] flex-col items-center justify-center px-1 py-2 text-center transition-colors active:bg-white/70 ${
                     index < quickTools.length - 1
                       ? "after:absolute after:right-0 after:top-1/2 after:h-11 after:w-px after:-translate-y-1/2 after:bg-[#e7e8ef]"
                       : ""
@@ -225,11 +222,8 @@ export function LearningHome() {
                   >
                     <Icon className={`h-6 w-6 ${tool.iconClass}`} />
                   </div>
-                  <p className="mt-2 text-[13px] font-black text-[#182033]">
-                    {tool.title}
-                  </p>
-                  <p className="mt-0.5 max-w-full truncate text-[9px] text-[#8c95a5]">
-                    {tool.subtitle}
+                  <p className="mt-2 max-w-full truncate text-[13px] font-black text-[#182033]">
+                    {copy.quick[tool.key]}
                   </p>
                 </Link>
               )
@@ -239,30 +233,25 @@ export function LearningHome() {
           <div className="mt-5 grid grid-cols-2 gap-3">
             {studyCards.map((item) => {
               const Icon = item.icon
+              const text = copy.cards[item.key]
               return (
                 <Link
-                  key={item.title}
+                  key={item.key}
                   href={item.href}
-                  className={`relative min-h-[122px] overflow-hidden rounded-[22px] border p-3 shadow-[0_12px_30px_rgba(58,67,96,0.14)] transition-transform active:scale-[0.99] ${item.cardClass}`}
+                  className={`relative min-h-[118px] overflow-hidden rounded-[22px] border p-3 shadow-[0_12px_30px_rgba(58,67,96,0.14)] transition-transform active:scale-[0.99] ${item.cardClass}`}
                 >
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-2">
                     <div
                       className={`flex h-9 w-9 items-center justify-center rounded-[13px] bg-white/75 ${item.iconClass}`}
                     >
                       <Icon className="h-4.5 w-4.5" />
                     </div>
-                    <span className="rounded-full bg-white/65 px-2 py-1 text-[9px] font-black tracking-[0.08em] text-[#707a8d]">
-                      {item.badge}
-                    </span>
                   </div>
-                  <h3 className="mt-2 text-[18px] font-black leading-tight">
-                    {item.title}
+                  <h3 className="mt-2 truncate text-[18px] font-black leading-tight">
+                    {text.title}
                   </h3>
-                  <p className="mt-0.5 truncate text-[9px] text-[#7f899a]">
-                    {item.subtitle}
-                  </p>
-                  <p className="mt-1 text-[10px] font-semibold text-[#5f6879]">
-                    {item.description}
+                  <p className="mt-1 line-clamp-2 text-[10px] font-semibold leading-4 text-[#5f6879]">
+                    {text.description}
                   </p>
                 </Link>
               )
@@ -270,22 +259,17 @@ export function LearningHome() {
           </div>
 
           <div className="mt-8 flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <MessageCircle className="h-5 w-5 text-[#58657a]" />
-                <h2 className="text-[20px] font-black tracking-tight sm:text-2xl">
-                  学习交流
-                </h2>
-              </div>
-              <p className="mt-1 text-[11px] text-[#7f899a] sm:text-xs">
-                နောက်ဆုံးဆွေးနွေးချက်များ
-              </p>
+            <div className="flex items-center gap-2">
+              <MessageCircle className="h-5 w-5 text-[#58657a]" />
+              <h2 className="text-[20px] font-black tracking-tight sm:text-2xl">
+                {copy.community}
+              </h2>
             </div>
             <Link
               href="/topics"
               className="inline-flex items-center text-[12px] font-bold text-[#655ce8]"
             >
-              全部
+              {copy.all}
               <ChevronRight className="h-4 w-4" />
             </Link>
           </div>

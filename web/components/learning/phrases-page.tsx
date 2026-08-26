@@ -6,13 +6,8 @@ import {
   ChevronDown,
   ChevronRight,
   Heart,
-  Mic,
-  Play,
-  Sparkles,
-  Volume2,
 } from "lucide-react"
 
-import { PronunciationRecorder } from "@/components/learning/pronunciation-recorder"
 import {
   readStorage,
   speakChinese,
@@ -47,7 +42,6 @@ type TouchPoint = {
   scrollTop: number
   scrollHeight: number
   clientHeight: number
-  bottomReserve: number
 }
 
 const defaultSettings: Settings = { autoRead: true, showPhonetic: true }
@@ -164,7 +158,6 @@ export function PhrasesPage() {
   const [viewed, setViewed] = React.useState<Record<string, true>>({})
   const [positions, setPositions] = React.useState<PositionMap>({})
   const [settings, setSettings] = React.useState<Settings>(defaultSettings)
-  const [recordingTarget, setRecordingTarget] = React.useState("")
   const touchStart = React.useRef<TouchPoint | null>(null)
   const studyScrollRef = React.useRef<HTMLElement | null>(null)
   const packAbort = React.useRef<AbortController | null>(null)
@@ -373,14 +366,12 @@ export function PhrasesPage() {
   function onTouchStart(event: React.TouchEvent<HTMLElement>) {
     const point = event.touches[0]
     const element = event.currentTarget
-    const bottomReserve = Number.parseFloat(window.getComputedStyle(element).paddingBottom) || 0
     touchStart.current = {
       x: point.clientX,
       y: point.clientY,
       scrollTop: element.scrollTop,
       scrollHeight: element.scrollHeight,
       clientHeight: element.clientHeight,
-      bottomReserve,
     }
   }
 
@@ -397,10 +388,7 @@ export function PhrasesPage() {
       return
     }
     if (Math.abs(dy) <= 65 || Math.abs(dy) <= Math.abs(dx) * 1.2) return
-    const effectiveScrollHeight = Math.max(
-      start.clientHeight,
-      start.scrollHeight - start.bottomReserve
-    )
+    const effectiveScrollHeight = start.scrollHeight
     const scrollable = effectiveScrollHeight > start.clientHeight + 8
     const atTop = start.scrollTop <= 8
     const atBottom = start.scrollTop + start.clientHeight >= effectiveScrollHeight - 8
@@ -418,8 +406,8 @@ export function PhrasesPage() {
     const trailingPunctuation = trailingSentencePunctuation(current.text)
 
     return (
-      <div data-learning-fullscreen className="fixed inset-0 z-[100] h-[100dvh] overflow-hidden bg-[#f3f4f8] text-[#191e2b]">
-        <div className="mx-auto flex h-full w-full max-w-3xl flex-col">
+      <div data-learning-fullscreen className="fixed inset-0 z-[100] h-[100dvh] overflow-hidden bg-[#edf3f1] text-[#191e2b]">
+        <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-3 pb-[max(10px,env(safe-area-inset-bottom))] sm:px-5">
           <header className="box-content flex h-[46px] shrink-0 items-end gap-2 px-3 pb-2 pt-[env(safe-area-inset-top)]">
             <button type="button" onClick={leavePack} className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#626979] shadow-sm" aria-label="返回"><ArrowLeft className="h-5 w-5" /></button>
             <div className="min-w-0 flex-1 text-center"><p className="truncate text-sm font-black">{packTitle}</p><p className="text-[10px] font-bold text-[#999fac]">{index + 1}/{phrases.length} · ↑下一句 ↓上一句</p></div>
@@ -431,7 +419,7 @@ export function PhrasesPage() {
             <button type="button" onClick={() => saveSettings({ ...settings, showPhonetic: !settings.showPhonetic })} className={`h-8 rounded-full px-3 text-[11px] font-black ${settings.showPhonetic ? "bg-[#fff1df] text-[#b97817]" : "bg-white text-[#818896]"}`}>谐音 {settings.showPhonetic ? "开" : "关"}</button>
           </div>
 
-          <main ref={studyScrollRef} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} style={{ paddingBottom: detailPage === 0 ? "calc(112px + env(safe-area-inset-bottom))" : "calc(24px + env(safe-area-inset-bottom))" }} className="relative min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain rounded-t-[30px] bg-white px-4 pt-4 shadow-[0_-10px_35px_rgba(38,44,70,.08)] sm:px-6">
+          <main ref={studyScrollRef} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }} className="relative mb-1 min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain rounded-[32px] border border-[#d5eadf] bg-[linear-gradient(150deg,#effaf5_0%,#fbfefd_54%,#eef5ff_100%)] px-4 pt-4 shadow-[0_20px_60px_rgba(38,44,70,.13)] sm:px-6">
             {detailPage === 0 ? (
               <>
                 {image ? <img src={image} alt={current.text} className="mx-auto mb-4 aspect-video w-full max-w-[360px] rounded-[20px] object-cover" /> : null}
@@ -489,17 +477,9 @@ export function PhrasesPage() {
               </div>
             )}
 
-            {hasPage2 ? <div className="sticky bottom-[82px] mt-5 flex justify-center"><div className="flex rounded-full bg-[#f0f1f5] p-1 shadow-sm"><button type="button" onClick={() => setDetailPage(0)} className={`rounded-full px-4 py-2 text-xs font-black ${detailPage === 0 ? "bg-white text-[#655ce8] shadow-sm" : "text-[#858c99]"}`}>句子解析</button><button type="button" onClick={() => setDetailPage(1)} className={`rounded-full px-4 py-2 text-xs font-black ${detailPage === 1 ? "bg-white text-[#655ce8] shadow-sm" : "text-[#858c99]"}`}>真实表达</button></div></div> : null}
+            {hasPage2 ? <div className="sticky bottom-3 mt-5 flex justify-center"><div className="flex rounded-full bg-[#f0f1f5] p-1 shadow-sm"><button type="button" onClick={() => setDetailPage(0)} className={`rounded-full px-4 py-2 text-xs font-black ${detailPage === 0 ? "bg-white text-[#655ce8] shadow-sm" : "text-[#858c99]"}`}>句子解析</button><button type="button" onClick={() => setDetailPage(1)} className={`rounded-full px-4 py-2 text-xs font-black ${detailPage === 1 ? "bg-white text-[#655ce8] shadow-sm" : "text-[#858c99]"}`}>真实表达</button></div></div> : null}
           </main>
 
-          {detailPage === 0 ? (
-            <div className="fixed inset-x-0 bottom-[max(8px,env(safe-area-inset-bottom))] z-20 mx-auto grid w-[calc(100%-24px)] max-w-[720px] grid-cols-4 gap-2 rounded-[24px] border border-white/80 bg-white/92 p-2 shadow-[0_14px_45px_rgba(32,38,67,.18)] backdrop-blur-xl">
-              <button type="button" onClick={() => speakChineseThenMyanmar(current.text, current.meaningMy, 0.94)} className="flex h-14 flex-col items-center justify-center rounded-[18px] bg-[#efedff] text-[#655ce8]"><Volume2 className="h-5 w-5" /><span className="mt-1 text-[10px] font-black">朗读</span></button>
-              <button type="button" onClick={() => speakChinese(current.text, 0.58)} className="flex h-14 flex-col items-center justify-center rounded-[18px] bg-[#edf5ff] text-[#3779c9]"><Play className="h-5 w-5 fill-current" /><span className="mt-1 text-[10px] font-black">拼读</span></button>
-              <button type="button" onClick={() => setRecordingTarget(current.text)} className="flex h-14 flex-col items-center justify-center rounded-[18px] bg-[#eaf8f1] text-[#268965]"><Mic className="h-5 w-5" /><span className="mt-1 text-[10px] font-black">跟读</span></button>
-              <button type="button" onClick={() => setDetailPage(hasPage2 ? 1 : 0)} className="flex h-14 flex-col items-center justify-center rounded-[18px] bg-[#fff3e7] text-[#b97317]"><Sparkles className="h-5 w-5" /><span className="mt-1 text-[10px] font-black">表达</span></button>
-            </div>
-          ) : null}
 
           <div className="fixed right-3 top-1/2 z-10 hidden -translate-y-1/2 flex-col gap-2 sm:flex">
             <button type="button" onClick={() => move(-1)} disabled={index === 0} className="flex h-10 w-10 rotate-180 items-center justify-center rounded-full bg-white shadow-md disabled:opacity-30"><ChevronDown className="h-5 w-5" /></button>
@@ -507,7 +487,6 @@ export function PhrasesPage() {
           </div>
         </div>
 
-        <PronunciationRecorder open={Boolean(recordingTarget)} target={recordingTarget} onClose={() => setRecordingTarget("")} />
       </div>
     )
   }
