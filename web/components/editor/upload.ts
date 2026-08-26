@@ -178,3 +178,36 @@ export async function uploadEditorImage(file: File) {
   const result = await uploadCommunityImage(file)
   return result.url
 }
+
+export type UploadedVoice = {
+  url: string
+  contentType?: string
+  size?: number
+}
+
+function voiceExtension(contentType: string) {
+  const type = contentType.toLowerCase()
+  if (type.includes("ogg")) return "ogg"
+  if (type.includes("mp4") || type.includes("m4a")) return "m4a"
+  if (type.includes("aac")) return "aac"
+  if (type.includes("mpeg")) return "mp3"
+  if (type.includes("wav")) return "wav"
+  return "webm"
+}
+
+export async function uploadCommunityVoice(blob: Blob) {
+  const contentType = blob.type || "audio/webm"
+  const extension = voiceExtension(contentType)
+  const file =
+    blob instanceof File
+      ? blob
+      : new File([blob], `voice-${Date.now()}.${extension}`, {
+          type: contentType,
+        })
+  const body = new FormData()
+  body.append("audio", file, file.name)
+  return apiFetch<UploadedVoice>("/api/upload/voice", {
+    method: "POST",
+    body,
+  })
+}
