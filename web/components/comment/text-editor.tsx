@@ -23,16 +23,19 @@ export type TextEditorRef = {
 
 const COMMENT_IMAGE_LIMIT = 9
 const VOICE_MAX_SECONDS = 60
-const VOICE_MIN_SECONDS = 0.5
-const VOICE_AUDIO_BITS_PER_SECOND = 16_000
+const VOICE_MIN_SECONDS = 0.7
+const VOICE_AUDIO_BITS_PER_SECOND = 24_000
 const VOICE_MIME_TYPES = [
+  // The Android forum recorder uses MPEG-4/AAC at 24 kbps / 16 kHz. Prefer
+  // the same container/codec when the browser supports it, then fall back to
+  // Opus containers on Chromium/Firefox.
+  "audio/mp4;codecs=mp4a.40.2",
+  "audio/mp4",
+  "audio/aac",
   "audio/webm;codecs=opus",
   "audio/webm",
   "audio/ogg;codecs=opus",
   "audio/ogg",
-  "audio/mp4;codecs=mp4a.40.2",
-  "audio/mp4",
-  "audio/aac",
 ] as const
 
 function imageSrc(image: ImageInfo) {
@@ -239,6 +242,10 @@ export const TextEditor = React.forwardRef<
       if (disabled || !images.length || imageUploading) {
         return
       }
+      if (voice) {
+        msgWarning(t("component.voice.standaloneOnly"))
+        return
+      }
       if (imageList.length >= COMMENT_IMAGE_LIMIT) {
         msgWarning(
           t("component.imageUpload.countLimitError", {
@@ -280,6 +287,7 @@ export const TextEditor = React.forwardRef<
       imageList,
       imageUploading,
       msgWarning,
+      voice,
       onImageListChange,
       t,
     ]
@@ -287,6 +295,10 @@ export const TextEditor = React.forwardRef<
 
   function openImagePicker() {
     if (disabled || recording || recordStarting) return
+    if (voice) {
+      msgWarning(t("component.voice.standaloneOnly"))
+      return
+    }
     setShowImageUpload(true)
     setIsFocus(true)
     textareaRef.current?.focus()
@@ -317,6 +329,10 @@ export const TextEditor = React.forwardRef<
       msgWarning(t("component.voice.unsupported"))
       return
     }
+    if (content.trim() || currentImages.length > 0) {
+      msgWarning(t("component.voice.standaloneOnly"))
+      return
+    }
     if (typeof window === "undefined" || typeof navigator === "undefined") {
       msgWarning(t("component.voice.unsupported"))
       return
@@ -344,6 +360,7 @@ export const TextEditor = React.forwardRef<
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: { ideal: 1 },
+          sampleRate: { ideal: 16_000 },
           echoCancellation: { ideal: true },
           noiseSuppression: { ideal: true },
           autoGainControl: { ideal: true },
@@ -401,7 +418,7 @@ export const TextEditor = React.forwardRef<
         }
         const duration = Math.max(
           1,
-          Math.min(VOICE_MAX_SECONDS, Math.round(measuredDuration))
+          Math.min(VOICE_MAX_SECONDS, Math.ceil(measuredDuration))
         )
         const previewUrl = URL.createObjectURL(blob)
         onVoiceChange({ blob, previewUrl, duration, mimeType })
@@ -529,7 +546,7 @@ export const TextEditor = React.forwardRef<
           "block w-full flex-1 resize-none rounded-t-lg border-0 bg-muted p-2.5 font-[inherit] leading-[1.8] text-foreground outline-0 overscroll-contain disabled:cursor-default disabled:opacity-70",
           isFocus && "bg-background"
         )}
-        disabled={disabled || recording || recordStarting}
+        disabled={disabled || recording || recordStarting || Boolean(voice)}
         onFocus={() => {
           setIsFocus(true)
           if (currentImages.length) {
@@ -661,7 +678,7 @@ export const TextEditor = React.forwardRef<
               "flex h-8 w-8 cursor-pointer select-none items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-primary disabled:cursor-not-allowed disabled:opacity-40",
               showImageUpload && "bg-accent text-primary"
             )}
-            disabled={disabled || recording || recordStarting}
+            disabled={disabled || recording || recordStarting || Boolean(voice)}
             aria-label={t("component.imageUpload.upload")}
             onClick={openImagePicker}
           >

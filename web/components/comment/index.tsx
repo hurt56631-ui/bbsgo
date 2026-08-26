@@ -30,7 +30,7 @@ import {
 } from "@/components/comment/text-editor"
 import {
   VoiceMessage,
-  buildVoiceCommentContent,
+  buildVoiceMessageContent,
   parseVoiceContent,
   type VoiceDraft,
 } from "@/components/comment/voice-message"
@@ -71,8 +71,7 @@ async function prepareReplyValue(value: ReplyValue) {
   }
   const voice = await prepareVoiceDraft(value.voice)
   return {
-    content: buildVoiceCommentContent(
-      value.content,
+    content: buildVoiceMessageContent(
       voice.uploadedUrl || "",
       voice.duration
     ),
@@ -213,6 +212,10 @@ function CommentInput({
       toast.error(t("component.comment.input.pleaseInput"))
       return
     }
+    if (voice && (content.trim() || imageList.length > 0)) {
+      toast.error(t("component.voice.standaloneOnly"))
+      return
+    }
     if (sending) {
       return
     }
@@ -224,8 +227,7 @@ function CommentInput({
       if (voice) {
         submitVoice = await prepareVoiceDraft(voice)
         if (submitVoice !== voice) setVoice(submitVoice)
-        submitContent = buildVoiceCommentContent(
-          content,
+        submitContent = buildVoiceMessageContent(
           submitVoice.uploadedUrl || "",
           submitVoice.duration
         )
@@ -236,7 +238,11 @@ function CommentInput({
           entityType,
           entityId,
           content: submitContent,
-          imageList: imageList.length ? JSON.stringify(imageList) : "",
+          imageList: voice
+            ? ""
+            : imageList.length
+              ? JSON.stringify(imageList)
+              : "",
         }),
       })
       onCreated(data)
@@ -476,6 +482,13 @@ function CommentSubList({
       toast.error(t("component.comment.input.pleaseInput"))
       return
     }
+    if (
+      replyValue.voice &&
+      (replyValue.content.trim() || replyValue.imageList.length > 0)
+    ) {
+      toast.error(t("component.voice.standaloneOnly"))
+      return
+    }
     if (replySending) return
     setReplySending(true)
     try {
@@ -490,9 +503,11 @@ function CommentSubList({
           entityId: commentId,
           quoteId: replyQuoteId,
           content: prepared.content,
-          imageList: replyValue.imageList.length
-            ? JSON.stringify(replyValue.imageList)
-            : "",
+          imageList: replyValue.voice
+            ? ""
+            : replyValue.imageList.length
+              ? JSON.stringify(replyValue.imageList)
+              : "",
         }),
       })
       setReplyQuoteId(0)

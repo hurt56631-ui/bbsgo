@@ -125,19 +125,13 @@ export function parseVoiceMessageContent(
   return parseVoiceContent(content).voice
 }
 
-export function buildVoiceMessageContent(url: string, duration: number) {
-  const seconds = Math.max(1, Math.min(600, Math.round(duration || 1)))
-  return `voice:${url.trim()}|${seconds}|`
-}
-
-export function buildVoiceCommentContent(
-  text: string,
+export function buildVoiceMessageContent(
   url: string,
-  duration: number
+  duration: number,
+  waveform = ""
 ) {
-  const marker = buildVoiceMessageContent(url, duration)
-  const normalizedText = String(text || "").trim()
-  return normalizedText ? `${normalizedText}\n${marker}` : marker
+  const seconds = Math.max(1, Math.min(60, Math.ceil(duration || 1)))
+  return `voice:${url.trim()}|${seconds}|${String(waveform || "").trim()}`
 }
 
 export function isVoiceMessageContent(content?: string | null) {
