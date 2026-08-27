@@ -1,41 +1,34 @@
 "use client"
 
 import Link from "@/components/common/link"
-
 import { useI18n } from "@/lib/i18n/provider"
 import { cn } from "@/lib/utils"
 
 const feedTabs = [
-  {
-    id: 0,
-    labelKey: "pages.topics.feedLatest",
-    href: "/topics/category/newest",
-  },
-  {
-    id: -1,
-    labelKey: "pages.topics.feedRecommend",
-    href: "/topics/category/recommend",
-  },
-  {
-    id: -2,
-    labelKey: "pages.topics.feedFollowing",
-    href: "/topics/category/feed",
-  },
+  { id: 0, labelKey: "pages.topics.feedLatest", href: "/topics/category/newest" },
+  { id: -1, labelKey: "pages.topics.feedRecommend", href: "/topics/category/recommend" },
+  { id: -2, labelKey: "pages.topics.feedFollowing", href: "/topics/category/feed" },
 ]
 
-export function TopicFeedTabs({
-  currentCategoryId,
-}: {
-  currentCategoryId: number
-}) {
-  const { t } = useI18n()
-  const currentTab =
-    feedTabs.find((item) => item.id === currentCategoryId) || feedTabs[0]
+function postLabel(locale: unknown) {
+  const value = String(locale || "zh-CN").toLowerCase()
+  if (value.startsWith("en")) return "Post"
+  if (value.startsWith("my")) return "ပို့စ်တင်ရန်"
+  return "发帖"
+}
+
+export function TopicFeedTabs({ currentCategoryId }: { currentCategoryId: number }) {
+  const { locale, t } = useI18n()
 
   return (
-    <div className="flex justify-between border-b border-border px-4 py-3">
-      <div className="text-base font-bold">{t(currentTab.labelKey)}</div>
-      <div className="inline-flex flex-wrap items-center gap-1 rounded-lg bg-muted p-1">
+    <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+      <Link
+        href="/topic/create"
+        className="inline-flex h-7 shrink-0 items-center text-base font-bold text-primary transition-colors hover:text-primary/80"
+      >
+        {postLabel(locale)}
+      </Link>
+      <div className="inline-flex min-w-0 flex-wrap items-center justify-end gap-1 rounded-lg bg-muted p-1">
         {feedTabs.map((item) => {
           const selected = currentCategoryId === item.id
           return (
