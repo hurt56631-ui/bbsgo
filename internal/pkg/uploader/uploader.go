@@ -19,6 +19,7 @@ var (
 	imagePrefix      = "images"
 	attachmentPrefix = "attachments"
 	voicePrefix      = "voice"
+	videoPrefix      = "video"
 )
 
 // PutOptions 对象上传时的可选参数；nil 表示不设置。
@@ -72,6 +73,16 @@ func GenerateVoiceKeyByContentType(contentType string) string {
 	return generateKeyWithPrefix(voicePrefix, strs.UUID(), ext)
 }
 
+// GenerateVideoKeyByContentType generates a forum video key. Comment video uploads
+// are normalized by Android to MP4/H.264/AAC before they reach the forum API.
+func GenerateVideoKeyByContentType(contentType string) string {
+	ext := getVideoExt(contentType)
+	if strs.IsBlank(ext) {
+		ext = ".mp4"
+	}
+	return generateKeyWithPrefix(videoPrefix, strs.UUID(), ext)
+}
+
 // NormalizeImageContentType 空时返回 image/jpeg，便于统一默认。
 func NormalizeImageContentType(ct string) string {
 	if strs.IsBlank(ct) {
@@ -97,6 +108,19 @@ func generateKeyWithPrefix(prefix string, filename, ext string) string {
 	}
 	cleanPrefix := strings.Trim(strings.TrimSpace(prefix), "/")
 	return cleanPrefix + "/" + datePath + filename + ext
+}
+
+func getVideoExt(contentType string) string {
+	if strs.IsBlank(contentType) {
+		return ""
+	}
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "video/mp4", "application/mp4":
+		return ".mp4"
+	default:
+		return ""
+	}
 }
 
 func getVoiceExt(contentType string) string {
