@@ -181,9 +181,9 @@ function LoadMoreContent<T>({
       return
     }
 
-    const storageKey = `bbsgo.load-more.v1:${persistenceKey}`
-    const lastStorageKey = "bbsgo.load-more.last.v1"
-    const metaStorageKey = `bbsgo.load-more.meta.v1:${persistenceKey}`
+    const storageKey = `bbsgo.load-more.v2:${persistenceKey}`
+    const lastStorageKey = "bbsgo.load-more.last.v2"
+    const metaStorageKey = `bbsgo.load-more.meta.v2:${persistenceKey}`
     type PersistedList = {
       savedAt?: number
       items?: T[]
@@ -305,9 +305,9 @@ function LoadMoreContent<T>({
 
   React.useEffect(() => {
     if (!persistenceKey || !persistenceHydrated || typeof window === "undefined") return
-    const storageKey = `bbsgo.load-more.v1:${persistenceKey}`
-    const lastStorageKey = "bbsgo.load-more.last.v1"
-    const metaStorageKey = `bbsgo.load-more.meta.v1:${persistenceKey}`
+    const storageKey = `bbsgo.load-more.v2:${persistenceKey}`
+    const lastStorageKey = "bbsgo.load-more.last.v2"
+    const metaStorageKey = `bbsgo.load-more.meta.v2:${persistenceKey}`
 
     const persist = () => {
       const snapshot = stateRef.current
