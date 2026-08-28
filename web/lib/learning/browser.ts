@@ -17,6 +17,16 @@ export function writeStorage<T>(key: string, value: T) {
   }
 }
 
+/** Small tactile acknowledgement for successful card changes on supported phones. */
+export function lightHaptic(duration = 12) {
+  if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function") return false
+  try {
+    return navigator.vibrate(Math.max(1, Math.min(30, Math.round(duration))))
+  } catch {
+    return false
+  }
+}
+
 /**
  * Primary public Edge/Microsoft TTS endpoint used by the learning pages.
  */
@@ -33,7 +43,7 @@ export const LEARNING_TTS_BACKUP_ENDPOINT =
 
 /** Microsoft neural speakers used by the learning pages. */
 export const LEARNING_TTS_VOICES = {
-  chinese: "zh-CN-XiaoxiaoNeural",
+  chinese: "zh-CN-XiaoxiaoMultilingualNeural",
   myanmar: "my-MM-NilarNeural",
 } as const
 
