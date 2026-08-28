@@ -4,10 +4,12 @@ import * as React from "react"
 import { ChevronDown, Heart, Play, Volume2 } from "lucide-react"
 
 import {
+  cacheWordAudioPack,
   lightHaptic,
   readStorage,
   speakChinese,
   speakMyanmar,
+  speakWordAudio,
   stopSpeech,
   writeStorage,
 } from "@/lib/learning/browser"
@@ -34,14 +36,8 @@ type TouchPoint = {
   clientHeight: number
 }
 
-const STUDY_BACKGROUNDS = [
-  "#f1edff",
-  "#eaf5ff",
-  "#fff3df",
-  "#eaf8f1",
-  "#fff0f3",
-  "#eef0ff",
-] as const
+const BLACKBOARD_COLOR = "#315c49"
+
 
 function groups(catalog: LearningCatalog) {
   return catalog.items.map((root) => ({
@@ -66,6 +62,8 @@ export function WordsPage() {
   const studyScrollRef = React.useRef<HTMLElement | null>(null)
   const ignoreClick = React.useRef(false)
   const packAbort = React.useRef<AbortController | null>(null)
+  const moveTimer = React.useRef<number | null>(null)
+  const [cardExit, setCardExit] = React.useState<-1 | 0 | 1>(0)
 
   React.useEffect(() => {
     setFavorites(readStorage<WordItem[]>(FAVORITES_KEY, []))
@@ -93,6 +91,7 @@ export function WordsPage() {
     () => () => {
       stopSpeech()
       packAbort.current?.abort()
+      if (moveTimer.current !== null) window.clearTimeout(moveTimer.current)
     },
     []
   )
@@ -184,6 +183,10 @@ export function WordsPage() {
       setPackId(stablePackId)
       setItems(stableItems)
       setIndex(restoredIndex)
+      // Fixed Chinese word recordings live at audio/<pack>/<id>.mp3.
+      // Cache the whole opened pack in the background for near-instant repeat study.
+      const audioPackId = stableItems[0]?.audioPackId || stablePackId
+      void cacheWordAudioPack(audioPackId, stableItems.map((item) => item.id))
     } catch (loadError) {
       if (controller.signal.aborted) return
       setError(loadError instanceof Error ? loadError.message : "单词数据加载失败")
@@ -213,6 +216,7 @@ export function WordsPage() {
     setIndex(0)
     setPackId("")
     setPackTitle("")
+    setCardExit(0)
   }
 
   function toggleFavorite() {
@@ -238,12 +242,18 @@ export function WordsPage() {
   }
 
   function move(delta: number) {
-    if (!items.length) return false
+    if (!items.length || cardExit !== 0) return false
     const next = Math.max(0, Math.min(items.length - 1, index + delta))
     if (next === index) return false
     stopSpeech()
     lightHaptic(12)
-    setIndex(next)
+    setCardExit(delta > 0 ? 1 : -1)
+    if (moveTimer.current !== null) window.clearTimeout(moveTimer.current)
+    moveTimer.current = window.setTimeout(() => {
+      setIndex(next)
+      setCardExit(0)
+      moveTimer.current = null
+    }, 155)
     return true
   }
 
@@ -291,29 +301,43 @@ export function WordsPage() {
   }
 
   if (current) {
-    const backgroundColor = STUDY_BACKGROUNDS[index % STUDY_BACKGROUNDS.length]
+    const examples = current.examples?.length
+      ? current.examples
+      : current.example
+        ? [{ text: current.example, pinyin: current.examplePinyin, meaningMy: current.exampleMy }]
+        : []
+    const cardMotion =
+      cardExit > 0
+        ? "-translate-y-[112%] rotate-[-1.2deg] opacity-10"
+        : cardExit < 0
+          ? "translate-y-[112%] rotate-[1.2deg] opacity-10"
+          : "translate-y-0 rotate-0 opacity-100"
 
     return (
       <div
         data-learning-fullscreen
-        className="fixed inset-0 z-[100] h-[100dvh] overflow-hidden text-[#1f2230] transition-colors duration-300"
-        style={{ backgroundColor }}
+        className="fixed inset-0 z-[100] h-[100dvh] overflow-hidden text-[#1f2230]"
+        style={{
+          backgroundColor: BLACKBOARD_COLOR,
+          backgroundImage:
+            "radial-gradient(circle at 15% 20%, rgba(255,255,255,.035), transparent 28%), radial-gradient(circle at 80% 70%, rgba(0,0,0,.06), transparent 36%)",
+        }}
       >
         <div className="mx-auto flex h-full w-full max-w-5xl flex-col">
-          <header className="flex shrink-0 items-center gap-3 border-b border-white/70 bg-white/45 px-4 pb-3 pt-[max(10px,env(safe-area-inset-top))] backdrop-blur-md sm:px-6">
+          <header className="flex shrink-0 items-center gap-3 border-b border-white/10 bg-[#294f3f]/88 px-4 pb-3 pt-[max(10px,env(safe-area-inset-top))] text-white backdrop-blur-md sm:px-6">
             <button
               type="button"
               onClick={leavePack}
-              className="min-w-0 rounded-full bg-white/80 px-3.5 py-2 text-left text-[13px] font-black text-[#5d55bf] shadow-sm active:scale-[.98]"
+              className="min-w-0 rounded-full bg-white/12 px-3.5 py-2 text-left text-[13px] font-black text-white shadow-sm ring-1 ring-white/10 active:scale-[.98]"
             >
-              <span className="mr-1 text-[#89869a]">分类</span>
+              <span className="mr-1 text-white/60">分类</span>
               <span className="inline-block max-w-[170px] truncate align-bottom sm:max-w-[320px]">{packTitle}</span>
             </button>
-            <p className="flex-1 text-center text-[11px] font-black text-[#737785]">{index + 1}/{items.length}</p>
+            <p className="flex-1 text-center text-[11px] font-black text-white/72">{index + 1}/{items.length}</p>
             <button
               type="button"
               onClick={toggleFavorite}
-              className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-black shadow-sm active:scale-[.98] ${isFavorite ? "bg-[#fff2cd] text-[#df9517]" : "bg-white/80 text-[#6f7280]"}`}
+              className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-black shadow-sm active:scale-[.98] ${isFavorite ? "bg-[#ffe9a8] text-[#9c6810]" : "bg-white/12 text-white"}`}
               aria-label={isFavorite ? "取消收藏" : "收藏"}
             >
               <Heart className={`h-4 w-4 ${isFavorite ? "fill-current" : ""}`} />收藏
@@ -324,69 +348,80 @@ export function WordsPage() {
             ref={studyScrollRef}
             onTouchStart={onTouchStart}
             onTouchEnd={onTouchEnd}
-            className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-[max(16px,env(safe-area-inset-bottom))] sm:px-6"
+            className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 sm:px-5 sm:pb-5 sm:pt-5"
           >
-            <div key={currentKey} className="mx-auto flex min-h-full w-full max-w-[760px] flex-col justify-center py-4 sm:py-6">
-              <section className="overflow-hidden rounded-[30px] border border-white/80 bg-white/60 shadow-[0_18px_55px_rgba(55,61,88,.10)] backdrop-blur-sm">
+            <div className="relative mx-auto min-h-full w-full max-w-[760px]">
+              <div className="pointer-events-none absolute inset-x-2 inset-y-1 rounded-[31px] border border-white/12 bg-[#244737] shadow-[0_18px_46px_rgba(0,0,0,.18)]" />
+
+              <section
+                key={currentKey}
+                className={`relative z-[1] flex min-h-[calc(100dvh-96px)] w-full flex-col overflow-hidden rounded-[30px] border border-[#e8e7df] bg-white shadow-[0_20px_58px_rgba(0,0,0,.24)] transition-[transform,opacity] duration-150 ease-out sm:min-h-[calc(100dvh-112px)] ${cardMotion}`}
+              >
                 <button
                   type="button"
-                  onClick={() => runTap(() => speakChinese(current.word, 0.94))}
-                  className="block w-full px-6 pb-5 pt-7 text-center active:bg-white/55 sm:px-10 sm:pb-6 sm:pt-9"
-                  aria-label={`朗读${current.word}`}
+                  onClick={() => runTap(() => speakWordAudio(current.audioPackId || current.packId, current.id, current.word, 0.96))}
+                  className="block w-full shrink-0 px-6 pb-5 pt-8 text-center active:bg-[#f7f7f2] sm:px-10 sm:pb-6 sm:pt-10"
+                  aria-label={`播放${current.word}固定音频`}
                 >
                   <div className="flex items-center justify-center gap-2">
-                    <h1 className="text-[58px] font-black leading-tight tracking-tight sm:text-[72px]">{current.word}</h1>
-                    <Volume2 className="h-5 w-5 shrink-0 text-[#777a87]" />
+                    <h1 className="text-[60px] font-black leading-tight tracking-tight text-[#20231f] sm:text-[76px]">{current.word}</h1>
+                    <Volume2 className="h-5 w-5 shrink-0 text-[#6e746e]" />
                   </div>
-                  {current.pinyin ? <p className="mt-3 text-[21px] font-semibold text-[#4c78b5] sm:text-[23px]">{current.pinyin}</p> : null}
-                  {current.phoneticMy ? <p className="mt-2 text-[16px] font-black leading-7 text-[#c27043] sm:text-[17px]">{current.phoneticMy}</p> : null}
+                  {current.pinyin ? <p className="mt-3 text-[21px] font-semibold text-[#436f96] sm:text-[23px]">{current.pinyin}</p> : null}
+                  {current.phoneticMy ? <p className="mt-2 text-[16px] font-black leading-7 text-[#b8653d] sm:text-[17px]">{current.phoneticMy}</p> : null}
                 </button>
 
                 {current.meaningMy ? (
                   <button
                     type="button"
                     onClick={() => runTap(() => speakMyanmar(current.meaningMy, 0.9))}
-                    className="flex w-full items-center justify-center gap-2 border-t border-white/80 bg-white/35 px-6 py-4 text-center text-[21px] font-black leading-8 text-[#247365] active:bg-white/65 sm:text-[23px]"
+                    className="flex w-full shrink-0 items-center justify-center gap-2 border-t border-[#ecece5] bg-[#fafaf6] px-6 py-4 text-center text-[20px] font-black leading-8 text-[#246c5d] active:bg-[#f2f5ef] sm:text-[22px]"
                     aria-label="朗读缅语释义"
                   >
                     <span>{current.meaningMy}</span>
                     <Volume2 className="h-4 w-4 shrink-0 opacity-70" />
                   </button>
                 ) : null}
+
+                {examples.length ? (
+                  <div className="flex-1 border-t border-[#ecece5] px-5 pb-5 pt-4 sm:px-7 sm:pb-7">
+                    <p className="mb-2 text-[11px] font-black tracking-[.12em] text-[#878b83]">例句</p>
+                    <div className="divide-y divide-[#ecece5]">
+                      {examples.map((example, exampleIndex) => (
+                        <div key={`${example.text}-${exampleIndex}`} className="py-3 first:pt-1 last:pb-1">
+                          <button
+                            type="button"
+                            onClick={() => runTap(() => speakChinese(example.text, 0.92))}
+                            className="flex w-full items-start justify-between gap-3 text-left active:opacity-65"
+                          >
+                            <span className="text-[18px] font-black leading-8 text-[#242833] sm:text-[20px]">{example.text}</span>
+                            <Volume2 className="mt-1 h-4 w-4 shrink-0 text-[#747987]" />
+                          </button>
+                          {example.pinyin ? <p className="mt-1 text-[13px] font-semibold leading-6 text-[#557eaf]">{example.pinyin}</p> : null}
+                          {example.meaningMy ? (
+                            <button
+                              type="button"
+                              onClick={() => runTap(() => speakMyanmar(example.meaningMy, 0.88))}
+                              className="mt-1.5 flex w-full items-start justify-between gap-3 text-left text-[15px] font-semibold leading-7 text-[#35796d] active:opacity-65"
+                            >
+                              <span>{example.meaningMy}</span>
+                              <Volume2 className="mt-1 h-3.5 w-3.5 shrink-0 opacity-70" />
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : <div className="flex-1" />}
+
+                <p className="shrink-0 border-t border-[#efefe9] px-4 py-2.5 text-center text-[10px] font-bold text-[#7d827a]">上滑下一词 · 下滑上一词 · 中文单词固定音频 · 释义和例句 TTS</p>
               </section>
-
-              {current.example ? (
-                <section className="mt-4 rounded-[26px] border border-white/75 bg-white/48 px-5 py-4 shadow-[0_12px_36px_rgba(55,61,88,.07)] backdrop-blur-sm sm:px-6">
-                  <p className="mb-2 text-[11px] font-black tracking-[.12em] text-[#8a8d99]">例句</p>
-                  <button
-                    type="button"
-                    onClick={() => runTap(() => speakChinese(current.example, 0.92))}
-                    className="flex w-full items-start justify-between gap-3 text-left active:opacity-65"
-                  >
-                    <span className="text-[19px] font-black leading-8 text-[#242833] sm:text-[21px]">{current.example}</span>
-                    <Volume2 className="mt-1 h-4 w-4 shrink-0 text-[#747987]" />
-                  </button>
-                  {current.examplePinyin ? <p className="mt-1 text-[13px] font-semibold leading-6 text-[#557eaf]">{current.examplePinyin}</p> : null}
-                  {current.exampleMy ? (
-                    <button
-                      type="button"
-                      onClick={() => runTap(() => speakMyanmar(current.exampleMy, 0.88))}
-                      className="mt-2 flex w-full items-start justify-between gap-3 text-left text-[15px] font-semibold leading-7 text-[#35796d] active:opacity-65"
-                    >
-                      <span>{current.exampleMy}</span>
-                      <Volume2 className="mt-1 h-3.5 w-3.5 shrink-0 opacity-70" />
-                    </button>
-                  ) : null}
-                </section>
-              ) : null}
-
-              <p className="mt-4 text-center text-[10px] font-bold text-[#7f8290]/75">上滑下一词 · 下滑上一词 · 点中文或缅语朗读</p>
             </div>
           </main>
 
           <div className="fixed right-3 top-1/2 z-10 hidden -translate-y-1/2 flex-col gap-2 lg:flex">
-            <button type="button" onClick={() => move(-1)} disabled={index === 0} className="flex h-10 w-10 rotate-180 items-center justify-center rounded-full border border-white/80 bg-white/80 shadow-sm disabled:opacity-25" aria-label="上一词"><ChevronDown className="h-5 w-5" /></button>
-            <button type="button" onClick={() => move(1)} disabled={index >= items.length - 1} className="flex h-10 w-10 items-center justify-center rounded-full border border-white/80 bg-white/80 shadow-sm disabled:opacity-25" aria-label="下一词"><ChevronDown className="h-5 w-5" /></button>
+            <button type="button" onClick={() => move(-1)} disabled={index === 0 || cardExit !== 0} className="flex h-10 w-10 rotate-180 items-center justify-center rounded-full border border-white/20 bg-[#274b3c]/90 text-white shadow-sm disabled:opacity-25" aria-label="上一词"><ChevronDown className="h-5 w-5" /></button>
+            <button type="button" onClick={() => move(1)} disabled={index >= items.length - 1 || cardExit !== 0} className="flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-[#274b3c]/90 text-white shadow-sm disabled:opacity-25" aria-label="下一词"><ChevronDown className="h-5 w-5" /></button>
           </div>
         </div>
       </div>
