@@ -22,6 +22,7 @@ import { PERMISSIONS } from "@/lib/auth/permissions.generated"
 import { userHasPermission } from "@/lib/auth/roles"
 import { useI18n } from "@/lib/i18n/provider"
 import { msg, useToastActions } from "@/lib/toast"
+import { invalidatePersistedTopicLists } from "@/lib/topic-list-persistence"
 
 function actionText(text: string, action: string) {
   return text.replace("{action}", action)
@@ -88,6 +89,7 @@ export function TopicManageMenu({
       await apiFetch<null>(`/api/topic/delete/${topic.id}`, {
         method: "POST",
       })
+      invalidatePersistedTopicLists()
       msg({
         message: t("component.topicManageMenu.deleteSuccess"),
         onClose() {
