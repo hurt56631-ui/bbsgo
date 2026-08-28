@@ -1,5 +1,5 @@
 const RELEASE_BASE =
-  "https://github.com/Hurt6465-ai/talkami-learning-content/releases/latest/download/"
+  "https://github.com/Hurt56631-ui/talkami-learning-content/releases/latest/download/"
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   ".json": "application/json; charset=utf-8",
