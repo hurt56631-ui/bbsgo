@@ -7,6 +7,11 @@ import type { Comment } from "@/lib/api/types"
 import { prettyDate } from "@/lib/format"
 import type { TFunction } from "@/lib/i18n"
 
+function isDirectVideoSrc(src?: string) {
+  const clean = (src || "").split(/[?#]/, 1)[0]?.toLowerCase() || ""
+  return /\.(mp4|m4v|webm|mov|3gp|mkv)$/.test(clean)
+}
+
 function CommentItem({
   comment,
   acceptedCommentId,
@@ -74,14 +79,29 @@ function CommentItem({
         ) : null}
         {comment.imageList?.length ? (
           <div className="mt-2.5 flex flex-wrap gap-2">
-            {comment.imageList.map((image, index) => (
-              <img
-                key={`${image.url || image.preview || index}`}
-                src={image.url || image.preview}
-                alt=""
-                className="h-[72px] w-[72px] cursor-pointer object-cover transition-all duration-500 ease-out hover:scale-[1.04]"
-              />
-            ))}
+            {comment.imageList.map((image, index) => {
+              const src = image.url || image.preview || ""
+              if (isDirectVideoSrc(src)) {
+                return (
+                  <video
+                    key={`${src}-${index}`}
+                    src={src}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="aspect-video w-full max-w-[320px] rounded-md bg-black object-contain"
+                  />
+                )
+              }
+              return (
+                <img
+                  key={`${src || index}`}
+                  src={src}
+                  alt=""
+                  className="h-[72px] w-[72px] cursor-pointer object-cover transition-all duration-500 ease-out hover:scale-[1.04]"
+                />
+              )
+            })}
           </div>
         ) : null}
         <div className="mt-2.5 flex flex-wrap items-center gap-2.5">
