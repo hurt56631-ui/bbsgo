@@ -281,6 +281,7 @@ func registerAPIRoutes(group *gin.RouterGroup) {
 
 	uploadGroup := group.Group("/upload")
 	uploadGroup.POST("", apiHandlers.UploadHandle)
+	uploadGroup.POST("/video", apiHandlers.UploadVideoHandle)
 	uploadGroup.POST("/voice", apiHandlers.UploadVoiceHandle)
 	uploadGroup.GET("/voice/preview", apiHandlers.VoicePreviewHandle)
 	uploadGroup.HEAD("/voice/preview", apiHandlers.VoicePreviewHandle)
