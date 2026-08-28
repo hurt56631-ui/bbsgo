@@ -1,6 +1,5 @@
 "use client"
 
-import { useCurrentUser } from "@/components/app/app-provider"
 import Link from "@/components/common/link"
 import { useI18n } from "@/lib/i18n/provider"
 import {
@@ -61,8 +60,6 @@ type LearningCopy = {
   heroTitle: string
   heroDescription: string
   start: string
-  login: string
-  register: string
   quickTitle: string
   quick: Record<(typeof quickTools)[number]["key"], string>
   cards: Record<
@@ -79,8 +76,6 @@ const learningCopy: Record<LearningLocale, LearningCopy> = {
     heroTitle: "每天进步一点点",
     heroDescription: "用短时间持续学习，把拼音、词汇和表达练扎实。",
     start: "开始学习",
-    login: "登录",
-    register: "注册",
     quickTitle: "快捷学习",
     quick: {
       pinyin: "拼音",
@@ -99,8 +94,6 @@ const learningCopy: Record<LearningLocale, LearningCopy> = {
     heroTitle: "Make progress every day",
     heroDescription: "Build solid pinyin, vocabulary, and speaking skills in short daily sessions.",
     start: "Start learning",
-    login: "Sign in",
-    register: "Sign up",
     quickTitle: "Quick study",
     quick: {
       pinyin: "Pinyin",
@@ -119,8 +112,6 @@ const learningCopy: Record<LearningLocale, LearningCopy> = {
     heroTitle: "နေ့တိုင်း နည်းနည်း တိုးတက်ပါ",
     heroDescription: "ပင်းယင်း၊ စကားလုံးနဲ့ စကားပြောကို နေ့စဉ် အချိန်တိုတိုနဲ့ လေ့ကျင့်ပါ။",
     start: "စလေ့လာမည်",
-    login: "ဝင်ရန်",
-    register: "စာရင်းသွင်းရန်",
     quickTitle: "အမြန်လေ့လာ",
     quick: {
       pinyin: "ပင်းယင်း",
@@ -144,7 +135,6 @@ function resolveLearningLocale(locale: unknown): LearningLocale {
 }
 
 export function LearningHome() {
-  const user = useCurrentUser()
   const { locale } = useI18n()
   const copy = learningCopy[resolveLearningLocale(locale)]
 
@@ -158,23 +148,6 @@ export function LearningHome() {
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/5 to-[#17213a]/88" />
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#17213a]/95 to-transparent" />
-
-        {!user ? (
-          <div className="absolute right-4 top-4 z-20 flex items-center gap-2 sm:right-6">
-            <Link
-              href="/user/signin?redirect=%2F"
-              className="inline-flex h-9 items-center rounded-full border border-white/40 bg-black/20 px-4 text-xs font-black text-white backdrop-blur-md transition active:scale-95"
-            >
-              {copy.login}
-            </Link>
-            <Link
-              href="/user/signup"
-              className="inline-flex h-9 items-center rounded-full bg-white px-4 text-xs font-black text-[#655ce8] shadow-[0_6px_18px_rgba(0,0,0,.15)] transition active:scale-95"
-            >
-              {copy.register}
-            </Link>
-          </div>
-        ) : null}
 
         <div className="relative mx-auto flex h-full w-full max-w-[1180px] items-end px-5 pb-[72px] sm:px-7 sm:pb-[78px]">
           <div className="max-w-xl text-white">
