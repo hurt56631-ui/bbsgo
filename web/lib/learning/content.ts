@@ -27,8 +27,15 @@ export type LearningCatalog = {
   items: LearningCatalogNode[]
 }
 
+export type WordExample = {
+  text: string
+  pinyin: string
+  meaningMy: string
+}
+
 export type WordItem = {
   packId: string
+  audioPackId: string
   id: string
   word: string
   pinyin: string
@@ -47,6 +54,7 @@ export type WordItem = {
   collocations: string[]
   audioOverride: string
   exampleAudioOverride: string
+  examples: WordExample[]
 }
 
 export type WordPack = {
@@ -154,6 +162,12 @@ function text(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
 }
 
+function identifier(value: unknown) {
+  if (typeof value === "string") return value.trim()
+  if (typeof value === "number" && Number.isFinite(value)) return String(value)
+  return ""
+}
+
 function numberValue(value: unknown, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback
 }
@@ -252,38 +266,70 @@ export function normalizeWordPack(
 ): WordPack {
   const root = record(raw)
   const packId = first(root.categoryId, root.pack_id, fallbackPackId)
+  // Legacy HSK files are intentionally lightweight and may be a top-level array:
+  // [{ id, hanzi, pinyin?, burmese, examples, level }]. Keep supporting the
+  // richer object format too so old/new content can coexist without migration.
+  const rawItems = Array.isArray(raw) ? raw : array(root.items)
   const items: WordItem[] = []
 
-  for (const [index, rawItem] of array(root.items).entries()) {
+  for (const [index, rawItem] of rawItems.entries()) {
     const item = record(rawItem)
-    const word = text(item.word)
+    const word = first(item.word, item.hanzi)
     if (!word) continue
+
     const translations = record(item.translations)
     const exampleTranslations = record(item.exampleTranslations)
+    const level = identifier(item.level)
+    const audioPackId = /^hsk[1-9]$/i.test(packId)
+      ? packId.toLowerCase()
+      : /^[1-9]$/.test(level)
+        ? `hsk${level}`
+        : packId
     const memoryTip = record(item.memory_tip)
     const pinyin = first(item.pinyin_override, item.pinyin)
-    const examplePinyin = first(item.example_pinyin_override, item.example_pinyin)
+    const legacyExamples = array(item.examples)
+      .map((rawExample) => {
+        const example = record(rawExample)
+        return {
+          text: first(example.text, example.hanzi),
+          pinyin: first(example.pinyin_override, example.pinyin),
+          meaningMy: first(example.meaning_my, example.burmese),
+        }
+      })
+      .filter((example) => example.text)
+
+    const richExampleText = text(item.example)
+    const richExamplePinyin = first(item.example_pinyin_override, item.example_pinyin)
+    const richExampleMy = first(item.example_my, exampleTranslations.my)
+    const examples = legacyExamples.length
+      ? legacyExamples
+      : richExampleText
+        ? [{ text: richExampleText, pinyin: richExamplePinyin, meaningMy: richExampleMy }]
+        : []
+    const firstExample = examples[0]
 
     items.push({
       packId,
-      id: first(item.id, `${packId}_${index}`),
+      audioPackId,
+      id: identifier(item.id) || `${packId}_${index + 1}`,
       word,
       pinyin,
       ttsPinyin: first(item.tts_pinyin_override, item.tts_pinyin, pinyin),
       phoneticMy: text(item.phonetic_my),
       partOfSpeech: first(item.part_of_speech, item.part_of_speech_my),
-      meaningMy: first(item.meaning_my, translations.my),
+      meaningMy: first(item.meaning_my, item.burmese, translations.my),
       usageSceneMy: first(item.usage_scene_my, item.usage_scene),
       memoryTip: first(item.memory_tip_my, memoryTip.my, item.memory_tip_zh, memoryTip.zh),
-      example: text(item.example),
-      examplePinyin,
-      exampleMy: first(item.example_my, exampleTranslations.my),
+      example: firstExample?.text || "",
+      examplePinyin: firstExample?.pinyin || "",
+      exampleMy: firstExample?.meaningMy || "",
       notesMy: first(item.notes_my, item.notes),
       synonyms: stringArray(item.synonyms),
       antonyms: stringArray(item.antonyms),
       collocations: stringArray(item.collocations),
       audioOverride: first(item.audio_override, item.audio),
       exampleAudioOverride: text(item.example_audio_override),
+      examples,
     })
   }
 
