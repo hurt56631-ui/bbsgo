@@ -1,0 +1,1581 @@
+"use client"
+
+import * as React from "react"
+import Link from "@/components/common/link"
+import { usePathname } from "@/lib/router/navigation"
+import {
+  ChevronRight,
+  Flag,
+  LogIn,
+  MessageCircle,
+  ThumbsUp,
+  Trash2,
+} from "lucide-react"
+
+import { UserAvatar } from "@/components/common/avatar"
+import {
+  ConfirmDialog,
+  type ConfirmDialogState,
+} from "@/components/common/confirm-dialog"
+import { EmptyState } from "@/components/common/empty-state"
+import {
+  HtmlImagePreview,
+  PreviewableImage,
+} from "@/components/common/image-preview"
+import { LoadMoreButton } from "@/components/common/load-more"
+import { UserReportDialog } from "@/components/common/user-report-dialog"
+import {
+  TextEditor,
+  type TextEditorRef,
+} from "@/components/comment/text-editor"
+import {
+  VoiceMessage,
+  buildVoiceMessageContent,
+  parseVoiceContent,
+  type VoiceDraft,
+} from "@/components/comment/voice-message"
+import { uploadCommunityVoice } from "@/components/editor/upload"
+import { apiFetch, toFormData } from "@/lib/api/client"
+import type { Comment, EntityId, ImageInfo, PageData } from "@/lib/api/types"
+import { PERMISSIONS } from "@/lib/auth/permissions.generated"
+import { userHasPermission } from "@/lib/auth/roles"
+import { prettyDate } from "@/lib/format"
+import { useI18n } from "@/lib/i18n/provider"
+import { useAppConfig, useCurrentUser } from "@/components/app/app-provider"
+import { buildSigninHref, toast, useToastActions } from "@/lib/toast"
+import { cn } from "@/lib/utils"
+
+type EntityType = "topic" | "article" | "comment" | string
+
+type ReplyValue = {
+  content: string
+  imageList: ImageInfo[]
+  voice: VoiceDraft | null
+}
+
+const COMMENT_LIVE_REFRESH_INTERVAL_MS = 3000
+
+function imageSrc(image: ImageInfo) {
+  return image.url || image.preview || ""
+}
+
+function isDirectVideoSrc(src: string) {
+  const clean = src.split(/[?#]/, 1)[0]?.toLowerCase() || ""
+  return /\.(mp4|m4v|webm|mov|3gp|mkv)$/.test(clean)
+}
+
+async function prepareVoiceDraft(voice: VoiceDraft) {
+  if (voice.uploadedUrl) return voice
+  const uploaded = await uploadCommunityVoice(voice.blob)
+  return { ...voice, uploadedUrl: uploaded.url }
+}
+
+async function prepareReplyValue(value: ReplyValue) {
+  if (!value.voice) {
+    return { content: value.content, voice: null as VoiceDraft | null }
+  }
+  const voice = await prepareVoiceDraft(value.voice)
+  return {
+    content: buildVoiceMessageContent(
+      voice.uploadedUrl || "",
+      voice.duration
+    ),
+    voice,
+  }
+}
+
+function commentContent(
+  comment: Comment,
+  size: "normal" | "small" | "quote" = "normal"
+) {
+  if (!comment.content) {
+    return null
+  }
+
+  const parsed = parseVoiceContent(comment.content)
+  const className = cn(
+    "content whitespace-pre-wrap",
+    size === "normal"
+      ? "mb-0 mt-2.5 text-[15px] leading-7 text-foreground"
+      : size === "small"
+        ? "mb-0 mt-1.5 text-sm leading-6 text-foreground"
+        : "my-1 text-sm leading-6 text-muted-foreground"
+  )
+
+  const textContent = parsed.text ? (
+    comment.contentType === "text" ? (
+      <div className={className}>{parsed.text}</div>
+    ) : (
+      <HtmlImagePreview html={parsed.text} className={className} />
+    )
+  ) : null
+
+  if (!parsed.voice) {
+    return textContent
+  }
+
+  return (
+    <>
+      {textContent}
+      <div
+        className={
+          size === "normal" ? "mt-2.5" : size === "small" ? "mt-1.5" : "my-1"
+        }
+      >
+        <VoiceMessage
+          source={parsed.voice.source}
+          duration={parsed.voice.duration}
+          waveform={parsed.voice.waveform}
+          compact={size !== "normal"}
+        />
+      </div>
+    </>
+  )
+}
+
+function CommentImages({
+  images,
+  size = "normal",
+}: {
+  images?: ImageInfo[]
+  size?: "normal" | "small" | "quote"
+}) {
+  if (!images?.length) {
+    return null
+  }
+
+  const imageClass =
+    size === "normal"
+      ? "h-[72px] w-[72px]"
+      : size === "small"
+        ? "h-[62px] w-[62px]"
+        : "h-[50px] w-[50px]"
+  const videoClass =
+    size === "normal"
+      ? "w-full max-w-[360px]"
+      : size === "small"
+        ? "w-full max-w-[280px]"
+        : "w-full max-w-[200px]"
+  const previewSrcList = images
+    .map(imageSrc)
+    .filter((src) => src && !isDirectVideoSrc(src))
+  let previewIndex = 0
+
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-start gap-2",
+        size === "quote" ? "mt-1" : size === "normal" ? "mt-2.5" : "mt-1.5"
+      )}
+    >
+      {images.map((image, index) => {
+        const src = imageSrc(image)
+        if (isDirectVideoSrc(src)) {
+          return (
+            <video
+              key={`${src}-${index}`}
+              src={src}
+              controls
+              playsInline
+              preload="metadata"
+              className={cn(videoClass, "aspect-video rounded-md bg-black object-contain")}
+            />
+          )
+        }
+        const currentPreviewIndex = previewIndex++
+        return (
+          <PreviewableImage
+            key={`${src}-${index}`}
+            src={src}
+            previewSrcList={previewSrcList}
+            initialIndex={currentPreviewIndex}
+            alt=""
+            className={cn(
+              imageClass,
+              "cursor-pointer object-cover transition-all duration-500 ease-out hover:scale-[1.04]"
+            )}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+function useCommentActions() {
+  const { t } = useI18n()
+  const { catchError, msgSignIn } = useToastActions()
+  const currentUser = useCurrentUser()
+
+  return {
+    t,
+    currentUser,
+    catchError,
+    msgSignIn,
+  }
+}
+
+function CommentInput({
+  entityType,
+  entityId,
+  onCreated,
+}: {
+  entityType: EntityType
+  entityId: EntityId
+  onCreated: (comment: Comment) => void
+}) {
+  const { t } = useI18n()
+  const { catchError } = useToastActions()
+  const editorRef = React.useRef<TextEditorRef>(null)
+  const [content, setContent] = React.useState("")
+  const [imageList, setImageList] = React.useState<ImageInfo[]>([])
+  const [voice, setVoice] = React.useState<VoiceDraft | null>(null)
+  const [sending, setSending] = React.useState(false)
+  const lastClickTimeRef = React.useRef(0)
+
+  async function create() {
+    const now = Date.now()
+    if (now - lastClickTimeRef.current < 500) {
+      return
+    }
+    lastClickTimeRef.current = now
+
+    if (!content.trim() && !voice) {
+      toast.error(t("component.comment.input.pleaseInput"))
+      return
+    }
+    if (voice && (content.trim() || imageList.length > 0)) {
+      toast.error(t("component.voice.standaloneOnly"))
+      return
+    }
+    if (sending) {
+      return
+    }
+
+    setSending(true)
+    try {
+      let submitContent = content
+      let submitVoice = voice
+      if (voice) {
+        submitVoice = await prepareVoiceDraft(voice)
+        if (submitVoice !== voice) setVoice(submitVoice)
+        submitContent = buildVoiceMessageContent(
+          submitVoice.uploadedUrl || "",
+          submitVoice.duration
+        )
+      }
+      const data = await apiFetch<Comment>("/api/comment/create", {
+        method: "POST",
+        body: toFormData({
+          entityType,
+          entityId,
+          content: submitContent,
+          imageList: voice
+            ? ""
+            : imageList.length
+              ? JSON.stringify(imageList)
+              : "",
+        }),
+      })
+      onCreated(data)
+      editorRef.current?.reset()
+      setContent("")
+      setImageList([])
+      setVoice(null)
+      toast.success(t("component.comment.input.publishSuccess"))
+    } catch (error) {
+      catchError(error)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className="my-2.5 bg-background">
+      <div className="relative box-border overflow-hidden p-0">
+        <TextEditor
+          ref={editorRef}
+          content={content}
+          imageList={imageList}
+          voice={voice}
+          height={90}
+          focusHeight={120}
+          disabled={sending}
+          onContentChange={setContent}
+          onImageListChange={setImageList}
+          onVoiceChange={setVoice}
+          onSubmit={() => void create()}
+        />
+      </div>
+    </div>
+  )
+}
+
+function InlineReplyEditor({
+  value,
+  disabled,
+  onChange,
+  onSubmit,
+}: {
+  value: ReplyValue
+  disabled?: boolean
+  onChange: (value: ReplyValue) => void
+  onSubmit: () => void
+}) {
+  const editorRef = React.useRef<TextEditorRef>(null)
+
+  React.useEffect(() => {
+    window.setTimeout(() => editorRef.current?.focus(), 100)
+  }, [])
+
+  return (
+    <TextEditor
+      ref={editorRef}
+      content={value.content}
+      imageList={value.imageList}
+      voice={value.voice}
+      height={80}
+      disabled={disabled}
+      onContentChange={(content) => onChange({ ...value, content })}
+      onImageListChange={(imageList) => onChange({ ...value, imageList })}
+      onVoiceChange={(voice) => onChange({ ...value, voice })}
+      onSubmit={onSubmit}
+    />
+  )
+}
+
+function compactReplyText(comment: Comment, voiceLabel: string) {
+  if (!comment) return ""
+  const parsed = parseVoiceContent(comment.content)
+  const content = parsed.text
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (content) return content
+  if (parsed.voice) return `[${voiceLabel}]`
+  if (comment.imageList?.length) return "[图片]"
+  return "[回复]"
+}
+
+function CommentSubPreview({
+  data,
+  total,
+  onOpen,
+}: {
+  data: PageData<Comment>
+  total: number
+  onOpen: () => void
+}) {
+  const { t } = useI18n()
+  const preview = (data.results || []).slice(0, 3)
+  if (!preview.length && total <= 0) return null
+  return (
+    <button
+      type="button"
+      className="mt-2.5 block w-full rounded-md bg-muted/70 px-3 py-2 text-left hover:bg-muted"
+      onClick={onOpen}
+    >
+      {preview.length ? <div className="space-y-1.5">
+        {preview.map((reply) => (
+          <div key={reply.id} className="line-clamp-2 text-[13px] leading-5 text-muted-foreground">
+            <span className="font-medium text-foreground">
+              {reply.user.nickname || reply.user.username || reply.user.id}
+            </span>
+            {reply.quote?.user ? (
+              <>
+                <span className="mx-1">{t("component.comment.subList.replyTo")}</span>
+                <span className="font-medium text-foreground">
+                  {reply.quote.user.nickname || reply.quote.user.username || reply.quote.user.id}
+                </span>
+              </>
+            ) : null}
+            <span>：{compactReplyText(reply, t("component.voice.message"))}</span>
+          </div>
+        ))}
+      </div> : null}
+      <div className={cn(preview.length ? "mt-1.5" : "", "text-[13px] font-medium text-primary")}>
+        {t("component.comment.subList.viewAll", { count: Math.max(total, preview.length) })}
+      </div>
+    </button>
+  )
+}
+
+type CommentUpdater = Comment | ((current: Comment) => Comment)
+type ReplyPageUpdater =
+  | PageData<Comment>
+  | ((current: PageData<Comment>) => PageData<Comment>)
+
+function CommentSubList({
+  commentId,
+  data,
+  onDataChanged,
+  onReply,
+  onReplyDeleted,
+}: {
+  commentId: number
+  data: PageData<Comment>
+  onDataChanged: (update: ReplyPageUpdater) => void
+  onReply: (comment: Comment) => void
+  onReplyDeleted: (commentId: number) => void
+}) {
+  const { t, currentUser, catchError, msgSignIn } = useCommentActions()
+  const replies = data
+  const [loadingMore, setLoadingMore] = React.useState(false)
+  const [replyQuoteId, setReplyQuoteId] = React.useState(0)
+  const [replyValue, setReplyValue] = React.useState<ReplyValue>({
+    content: "",
+    imageList: [],
+    voice: null,
+  })
+  const [replySending, setReplySending] = React.useState(false)
+  const [reportComment, setReportComment] = React.useState<Comment | null>(null)
+  const [confirmState, setConfirmState] =
+    React.useState<ConfirmDialogState>(null)
+
+  async function loadMore() {
+    if (loadingMore || !replies.hasMore) {
+      return
+    }
+    setLoadingMore(true)
+    try {
+      const ret = await apiFetch<PageData<Comment>>("/api/comment/replies", {
+        params: { commentId, cursor: replies.cursor || "" },
+      })
+      onDataChanged((current) => ({
+        cursor: ret.cursor,
+        hasMore: ret.hasMore,
+        results: mergeUniqueReplies(current.results || [], ret.results || []),
+      }))
+    } catch (error) {
+      catchError(error)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  async function toggleLike(comment: Comment) {
+    try {
+      if (comment.liked) {
+        await apiFetch<null>("/api/like/unlike", {
+          method: "POST",
+          body: toFormData({ entityType: "comment", entityId: comment.id }),
+        })
+        onDataChanged((current) => ({
+          ...current,
+          results: current.results.map((item) =>
+            item.id === comment.id
+              ? {
+                  ...item,
+                  liked: false,
+                  likeCount: Math.max(0, (item.likeCount || 0) - 1),
+                }
+              : item
+          ),
+        }))
+      } else {
+        await apiFetch<null>("/api/like/like", {
+          method: "POST",
+          body: toFormData({ entityType: "comment", entityId: comment.id }),
+        })
+        onDataChanged((current) => ({
+          ...current,
+          results: current.results.map((item) =>
+            item.id === comment.id
+              ? {
+                  ...item,
+                  liked: true,
+                  likeCount: (item.likeCount || 0) + 1,
+                }
+              : item
+          ),
+        }))
+      }
+    } catch (error) {
+      catchError(error)
+    }
+  }
+
+  function switchShowReply(comment: Comment) {
+    if (replySending) return
+    if (!currentUser) {
+      msgSignIn()
+      return
+    }
+    if (replyQuoteId === comment.id) {
+      setReplyQuoteId(0)
+      setReplyValue({ content: "", imageList: [], voice: null })
+    } else {
+      setReplyQuoteId(comment.id)
+    }
+  }
+
+  async function submitReply() {
+    if (!replyValue.content.trim() && !replyValue.voice) {
+      toast.error(t("component.comment.input.pleaseInput"))
+      return
+    }
+    if (
+      replyValue.voice &&
+      (replyValue.content.trim() || replyValue.imageList.length > 0)
+    ) {
+      toast.error(t("component.voice.standaloneOnly"))
+      return
+    }
+    if (replySending) return
+    setReplySending(true)
+    try {
+      const prepared = await prepareReplyValue(replyValue)
+      if (prepared.voice && prepared.voice !== replyValue.voice) {
+        setReplyValue({ ...replyValue, voice: prepared.voice })
+      }
+      const ret = await apiFetch<Comment>("/api/comment/create", {
+        method: "POST",
+        body: toFormData({
+          entityType: "comment",
+          entityId: commentId,
+          quoteId: replyQuoteId,
+          content: prepared.content,
+          imageList: replyValue.voice
+            ? ""
+            : replyValue.imageList.length
+              ? JSON.stringify(replyValue.imageList)
+              : "",
+        }),
+      })
+      setReplyQuoteId(0)
+      setReplyValue({ content: "", imageList: [], voice: null })
+      onReply(ret)
+    } catch (error) {
+      catchError(error)
+    } finally {
+      setReplySending(false)
+    }
+  }
+
+  async function deleteReply(comment: Comment) {
+    try {
+      await apiFetch<null>(`/api/comment/delete/${comment.id}`, {
+        method: "POST",
+      })
+      onReplyDeleted(comment.id)
+      toast.success(t("component.comment.deleteSuccess"))
+    } catch (error) {
+      catchError(error)
+    }
+  }
+
+  function confirmDeleteReply(comment: Comment) {
+    setConfirmState({
+      description: t("component.comment.deleteConfirm"),
+      confirmText: t("component.comment.subList.delete"),
+      onConfirm: () => {
+        void deleteReply(comment)
+      },
+    })
+  }
+
+  function showReport(comment: Comment) {
+    if (!currentUser) {
+      msgSignIn()
+      return
+    }
+    setReportComment(comment)
+  }
+
+  return (
+    <>
+      <div className="mt-2.5 text-sm">
+        {replies.results.map((comment) => (
+          <div key={comment.id} className="flex py-2">
+            <div>
+              <UserAvatar user={comment.user} size={24} />
+            </div>
+            <div className="ml-1.5 min-w-0 flex-1">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <Link
+                    href={`/user/${comment.user.id}`}
+                    className="truncate text-sm text-foreground hover:text-primary"
+                  >
+                    {comment.user.nickname ||
+                      comment.user.username ||
+                      comment.user.id}
+                  </Link>
+                  {comment.quote ? (
+                    <>
+                      &nbsp;
+                      <span className="text-muted-foreground">
+                        {t("component.comment.subList.replyTo")}
+                      </span>
+                      &nbsp;
+                      <Link
+                        href={`/user/${comment.quote.user.id}`}
+                        className="text-sm text-foreground hover:text-primary"
+                      >
+                        {comment.quote.user.nickname ||
+                          comment.quote.user.username ||
+                          comment.quote.user.id}
+                      </Link>
+                    </>
+                  ) : null}
+                </div>
+                {comment.createTime ? (
+                  <time className="text-xs text-muted-foreground">
+                    {prettyDate(comment.createTime, t)}
+                  </time>
+                ) : null}
+              </div>
+              <div>
+                {commentContent(comment, "small")}
+                <CommentImages images={comment.imageList} size="small" />
+                {comment.quote ? (
+                  <div className="relative my-1.5 box-border rounded border border-border bg-muted px-3 py-1 text-muted-foreground">
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute -top-2 right-0.5 text-3xl leading-none font-bold text-muted-foreground"
+                    >
+                      ”
+                    </span>
+                    {commentContent(comment.quote, "quote")}
+                    <CommentImages
+                      images={comment.quote.imageList}
+                      size="quote"
+                    />
+                  </div>
+                ) : null}
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  className={cn(
+                    "flex items-center gap-1 text-xs text-muted-foreground select-none hover:text-primary",
+                    comment.liked && "font-medium text-primary"
+                  )}
+                  onClick={() => void toggleLike(comment)}
+                >
+                  <ThumbsUp className="h-3 w-3" />
+                  <span>
+                    {comment.liked
+                      ? t("component.comment.subList.liked")
+                      : t("component.comment.subList.like")}
+                  </span>
+                  {comment.likeCount && comment.likeCount > 0 ? (
+                    <span>{comment.likeCount}</span>
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "flex items-center gap-1 text-xs text-muted-foreground select-none hover:text-primary disabled:cursor-not-allowed disabled:opacity-50",
+                    replyQuoteId === comment.id && "font-medium text-primary"
+                  )}
+                  disabled={replySending}
+                  onClick={() => switchShowReply(comment)}
+                >
+                  <MessageCircle className="h-3 w-3" />
+                  <span>
+                    {replyQuoteId === comment.id
+                      ? t("component.comment.subList.cancelReply")
+                      : t("component.comment.subList.reply")}
+                  </span>
+                </button>
+                {currentUser?.id === comment.user.id ||
+                userHasPermission(
+                  currentUser,
+                  PERMISSIONS.DASHBOARD_COMMENT_DELETE
+                ) ? (
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 text-xs text-muted-foreground select-none hover:text-destructive"
+                    onClick={() => confirmDeleteReply(comment)}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    <span>{t("component.comment.subList.delete")}</span>
+                  </button>
+                ) : null}
+                {currentUser?.id !== comment.user.id ? (
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 text-xs text-muted-foreground select-none hover:text-destructive"
+                    onClick={() => showReport(comment)}
+                  >
+                    <Flag className="h-3 w-3" />
+                    <span>{t("component.comment.subList.report")}</span>
+                  </button>
+                ) : null}
+              </div>
+              {replyQuoteId === comment.id ? (
+                <div className="mt-2.5">
+                  <InlineReplyEditor
+                    value={replyValue}
+                    disabled={replySending}
+                    onChange={setReplyValue}
+                    onSubmit={() => void submitReply()}
+                  />
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ))}
+        {replies.hasMore === true ? (
+          <div className="my-2.5 ml-[30px]">
+            <button
+              type="button"
+              className="flex items-center text-[13px] text-foreground hover:text-primary"
+              disabled={loadingMore}
+              onClick={() => void loadMore()}
+            >
+              <span>{t("component.comment.subList.loadMore")}</span>
+              <ChevronRight className="h-[13px] w-[13px] rotate-90" />
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <ConfirmDialog
+        state={confirmState}
+        onOpenChange={(open) => {
+          if (!open) setConfirmState(null)
+        }}
+      />
+      <UserReportDialog
+        open={Boolean(reportComment)}
+        dataId={reportComment?.id || 0}
+        dataType="comment"
+        onOpenChange={(open) => {
+          if (!open) setReportComment(null)
+        }}
+      />
+    </>
+  )
+}
+
+function CommentItem({
+  comment,
+  acceptedCommentId,
+  allowAcceptAnswer,
+  entityType,
+  entityId,
+  onChanged,
+  onDeleted,
+}: {
+  comment: Comment
+  acceptedCommentId: number
+  allowAcceptAnswer: boolean
+  entityType: EntityType
+  entityId: EntityId
+  onChanged: (update: CommentUpdater) => void
+  onDeleted: (comment: Comment) => void
+}) {
+  const { t, currentUser, catchError, msgSignIn } = useCommentActions()
+  const canDeleteComment =
+    currentUser?.id === comment.user.id ||
+    userHasPermission(currentUser, PERMISSIONS.DASHBOARD_COMMENT_DELETE)
+  const [replyCommentId, setReplyCommentId] = React.useState(0)
+  const [replyValue, setReplyValue] = React.useState<ReplyValue>({
+    content: "",
+    imageList: [],
+    voice: null,
+  })
+  const [replySending, setReplySending] = React.useState(false)
+  const [reportOpen, setReportOpen] = React.useState(false)
+  const [confirmState, setConfirmState] =
+    React.useState<ConfirmDialogState>(null)
+  const isAccepted = acceptedCommentId === comment.id
+  const [showReplies, setShowReplies] = React.useState(false)
+  const replyPage: PageData<Comment> = comment.replies || {
+    cursor: "",
+    hasMore: (comment.commentCount || 0) > 0,
+    results: [],
+  }
+
+  async function toggleLike() {
+    try {
+      if (comment.liked) {
+        await apiFetch<null>("/api/like/unlike", {
+          method: "POST",
+          body: toFormData({ entityType: "comment", entityId: comment.id }),
+        })
+        onChanged((current) => ({
+          ...current,
+          liked: false,
+          likeCount: Math.max(0, (current.likeCount || 0) - 1),
+        }))
+      } else {
+        await apiFetch<null>("/api/like/like", {
+          method: "POST",
+          body: toFormData({ entityType: "comment", entityId: comment.id }),
+        })
+        onChanged((current) => ({
+          ...current,
+          liked: true,
+          likeCount: (current.likeCount || 0) + 1,
+        }))
+      }
+    } catch (error) {
+      catchError(error)
+    }
+  }
+
+  function switchShowReply() {
+    if (replySending) return
+    if (!currentUser) {
+      msgSignIn()
+      return
+    }
+    if (replyCommentId === comment.id) {
+      setReplyCommentId(0)
+      setReplyValue({ content: "", imageList: [], voice: null })
+    } else {
+      setReplyCommentId(comment.id)
+    }
+  }
+
+  async function submitReply(parent: Comment) {
+    if (!replyValue.content.trim() && !replyValue.voice) {
+      toast.error(t("component.comment.input.pleaseInput"))
+      return
+    }
+    if (replySending) return
+    setReplySending(true)
+    try {
+      const prepared = await prepareReplyValue(replyValue)
+      if (prepared.voice && prepared.voice !== replyValue.voice) {
+        setReplyValue({ ...replyValue, voice: prepared.voice })
+      }
+      const ret = await apiFetch<Comment>("/api/comment/create", {
+        method: "POST",
+        body: toFormData({
+          entityType: "comment",
+          entityId: parent.id,
+          content: prepared.content,
+          imageList: replyValue.imageList.length
+            ? JSON.stringify(replyValue.imageList)
+            : "",
+        }),
+      })
+      setReplyCommentId(0)
+      setReplyValue({ content: "", imageList: [], voice: null })
+      onChanged((current) => appendReply(current, ret))
+      toast.success(t("component.comment.list.publishSuccess"))
+    } catch (error) {
+      catchError(error)
+    } finally {
+      setReplySending(false)
+    }
+  }
+
+  async function acceptAnswer() {
+    try {
+      await apiFetch<null>(`/api/topic/accept_answer/${entityId}`, {
+        method: "POST",
+        body: toFormData({ commentId: comment.id }),
+      })
+      toast.success(t("component.comment.list.acceptSuccess"))
+      onChanged({ ...comment, accepted: true } as Comment)
+    } catch (error) {
+      catchError(error)
+    }
+  }
+
+  async function unacceptAnswer() {
+    try {
+      await apiFetch<null>(`/api/topic/unaccept_answer/${entityId}`, {
+        method: "POST",
+      })
+      toast.success(t("component.comment.list.unacceptSuccess"))
+      onChanged({ ...comment, accepted: false } as Comment)
+    } catch (error) {
+      catchError(error)
+    }
+  }
+
+  async function deleteComment() {
+    try {
+      await apiFetch<null>(`/api/comment/delete/${comment.id}`, {
+        method: "POST",
+      })
+      toast.success(t("component.comment.deleteSuccess"))
+      onDeleted(comment)
+    } catch (error) {
+      catchError(error)
+    }
+  }
+
+  function confirmDeleteComment() {
+    setConfirmState({
+      description: t("component.comment.deleteConfirm"),
+      confirmText: t("component.comment.list.delete"),
+      onConfirm: () => {
+        void deleteComment()
+      },
+    })
+  }
+
+  function showReport() {
+    if (!currentUser) {
+      msgSignIn()
+      return
+    }
+    setReportOpen(true)
+  }
+
+  return (
+    <>
+      <div
+        data-topic-comment-id={entityType === "topic" ? comment.id : undefined}
+        className={cn(
+          "flex py-2.5",
+          isAccepted
+            ? "mb-2 rounded-lg border border-primary/20 bg-primary/[0.06] p-3"
+            : "border-b border-border last:border-b-0"
+        )}
+      >
+        <div>
+          <UserAvatar user={comment.user} size={30} />
+        </div>
+        <div className="ml-2.5 min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <Link
+                href={`/user/${comment.user.id}`}
+                className="truncate text-[15px] text-foreground hover:text-primary"
+              >
+                {comment.user.nickname ||
+                  comment.user.username ||
+                  comment.user.id}
+              </Link>
+              {isAccepted ? (
+                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-primary">
+                  {t("component.comment.list.acceptedAnswer")}
+                </span>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-2.5">
+              {comment.createTime ? (
+                <time className="text-[13px] text-muted-foreground">
+                  {prettyDate(comment.createTime, t)}
+                </time>
+              ) : null}
+              {comment.ipLocation ? (
+                <span className="text-[13px] text-muted-foreground">
+                  {t("component.comment.list.ipLocation")}
+                  {comment.ipLocation}
+                </span>
+              ) : null}
+            </div>
+          </div>
+          <div>
+            {commentContent(comment)}
+            <CommentImages images={comment.imageList} />
+          </div>
+          <div className="mt-2.5 flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              className={cn(
+                "flex items-center gap-1 text-[13px] text-muted-foreground select-none hover:text-primary",
+                comment.liked && "font-medium text-primary"
+              )}
+              onClick={() => void toggleLike()}
+            >
+              <ThumbsUp className="h-3.5 w-3.5" />
+              <span>
+                {comment.liked
+                  ? t("component.comment.list.liked")
+                  : t("component.comment.list.like")}
+              </span>
+              {comment.likeCount && comment.likeCount > 0 ? (
+                <span>{comment.likeCount}</span>
+              ) : null}
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "flex items-center gap-1 text-[13px] text-muted-foreground select-none hover:text-primary disabled:cursor-not-allowed disabled:opacity-50",
+                replyCommentId === comment.id && "font-medium text-primary"
+              )}
+              disabled={replySending}
+              onClick={switchShowReply}
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+              <span>
+                {replyCommentId === comment.id
+                  ? t("component.comment.list.cancelReply")
+                  : t("component.comment.list.reply")}
+              </span>
+            </button>
+            {allowAcceptAnswer && entityType === "topic" ? (
+              <button
+                type="button"
+                className="flex items-center gap-1 text-[13px] text-muted-foreground select-none hover:text-primary"
+                onClick={() =>
+                  isAccepted ? void unacceptAnswer() : void acceptAnswer()
+                }
+              >
+                <span>
+                  {isAccepted
+                    ? t("component.comment.list.unacceptAnswer")
+                    : t("component.comment.list.acceptAnswer")}
+                </span>
+              </button>
+            ) : null}
+            {canDeleteComment ? (
+              <button
+                type="button"
+                className="flex items-center gap-1 text-[13px] text-muted-foreground select-none hover:text-destructive"
+                onClick={confirmDeleteComment}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>{t("component.comment.list.delete")}</span>
+              </button>
+            ) : null}
+            {currentUser?.id !== comment.user.id ? (
+              <button
+                type="button"
+                className="flex items-center gap-1 text-[13px] text-muted-foreground select-none hover:text-destructive"
+                onClick={showReport}
+              >
+                <Flag className="h-3.5 w-3.5" />
+                <span>{t("component.comment.list.report")}</span>
+              </button>
+            ) : null}
+          </div>
+          {replyCommentId === comment.id ? (
+            <div className="mt-2.5">
+              <InlineReplyEditor
+                value={replyValue}
+                disabled={replySending}
+                onChange={setReplyValue}
+                onSubmit={() => void submitReply(comment)}
+              />
+            </div>
+          ) : null}
+          {comment.replies?.results?.length || (comment.commentCount || 0) > 0 ? (
+            showReplies ? (
+              <div>
+                <CommentSubList
+                  key={comment.id}
+                  commentId={comment.id}
+                  data={replyPage}
+                  onDataChanged={(update) =>
+                    onChanged((current) => {
+                      const currentReplies = current.replies || {
+                        cursor: "",
+                        hasMore: (current.commentCount || 0) > 0,
+                        results: [],
+                      }
+                      const nextReplies =
+                        typeof update === "function"
+                          ? update(currentReplies)
+                          : update
+                      return { ...current, replies: nextReplies }
+                    })
+                  }
+                  onReply={(reply) =>
+                    onChanged((current) => appendReply(current, reply))
+                  }
+                  onReplyDeleted={(replyId) =>
+                    onChanged((current) => removeReply(current, replyId))
+                  }
+                />
+                <button
+                  type="button"
+                  className="mt-1 text-[13px] font-medium text-primary"
+                  onClick={() => setShowReplies(false)}
+                >
+                  {t("component.comment.subList.collapse")}
+                </button>
+              </div>
+            ) : (
+              <CommentSubPreview
+                data={replyPage}
+                total={comment.commentCount || replyPage.results.length}
+                onOpen={() => setShowReplies(true)}
+              />
+            )
+          ) : null}
+        </div>
+      </div>
+      <ConfirmDialog
+        state={confirmState}
+        onOpenChange={(open) => {
+          if (!open) setConfirmState(null)
+        }}
+      />
+      <UserReportDialog
+        open={reportOpen}
+        dataId={comment.id}
+        dataType="comment"
+        onOpenChange={setReportOpen}
+      />
+    </>
+  )
+}
+
+function mergeUniqueComments(current: Comment[], incoming: Comment[]): Comment[] {
+  if (!incoming.length) return current
+  const ids = new Set(current.map((item) => item.id))
+  const merged = [...current]
+  for (const item of incoming) {
+    if (!ids.has(item.id)) {
+      ids.add(item.id)
+      merged.push(item)
+    }
+  }
+  return merged
+}
+
+function mergeUniqueReplies(current: Comment[], incoming: Comment[]): Comment[] {
+  return mergeUniqueComments(current, incoming).sort(
+    (left, right) => Number(left.id) - Number(right.id)
+  )
+}
+
+function mergeLiveComment(current: Comment, incoming: Comment): Comment {
+  if (!current.replies && !incoming.replies) {
+    return { ...current, ...incoming }
+  }
+
+  const mergedReplies = mergeUniqueReplies(
+    current.replies?.results || [],
+    incoming.replies?.results || []
+  )
+  const replyCount = Math.max(
+    0,
+    Number(incoming.commentCount ?? current.commentCount ?? mergedReplies.length)
+  )
+
+  return {
+    ...current,
+    ...incoming,
+    replies: {
+      cursor: mergedReplies.length
+        ? String(mergedReplies[mergedReplies.length - 1].id)
+        : incoming.replies?.cursor || current.replies?.cursor || "",
+      hasMore: replyCount > mergedReplies.length,
+      results: mergedReplies,
+    },
+  }
+}
+
+function mergeLiveCommentPage(
+  current: Comment[],
+  incoming: Comment[]
+): Comment[] {
+  if (!incoming.length) return current
+
+  const currentById = new Map(current.map((item) => [item.id, item]))
+  const incomingIds = new Set(incoming.map((item) => item.id))
+  const merged = incoming.map((item) => {
+    const existing = currentById.get(item.id)
+    return existing ? mergeLiveComment(existing, item) : item
+  })
+
+  // The realtime refresh only asks for the newest first page. Preserve older
+  // pages that the reader has already loaded below it.
+  for (const item of current) {
+    if (!incomingIds.has(item.id)) {
+      merged.push(item)
+    }
+  }
+  return merged
+}
+
+function appendReply(parent: Comment, reply: Comment): Comment {
+  if (parent.replies?.results) {
+    if (parent.replies.results.some((item) => item.id === reply.id)) return parent
+    return {
+      ...parent,
+      commentCount: Math.max(0, Number(parent.commentCount || 0)) + 1,
+      replies: {
+        ...parent.replies,
+        // A live/local reply may arrive while older reply pages are still
+        // missing. Keep the visible nested thread ascending so loading the
+        // middle pages later cannot produce 1,2,3,100,4,5... ordering.
+        results: mergeUniqueReplies(parent.replies.results, [reply]),
+      },
+    }
+  }
+
+  const previousCount = Math.max(0, Number(parent.commentCount || 0))
+  return {
+    ...parent,
+    commentCount: previousCount + 1,
+    replies: {
+      cursor: String(reply.id),
+      hasMore: previousCount > 0,
+      results: [reply],
+    },
+  }
+}
+
+function removeReply(parent: Comment, replyId: number): Comment {
+  const results = parent.replies?.results || []
+  const existed = results.some((item) => item.id === replyId)
+  if (!existed) return parent
+  return {
+    ...parent,
+    commentCount: Math.max(0, Number(parent.commentCount || 0) - 1),
+    replies: parent.replies
+      ? {
+          ...parent.replies,
+          results: results.filter((item) => item.id !== replyId),
+        }
+      : parent.replies,
+  }
+}
+
+export function CommentSection({
+  entityType,
+  entityId,
+  commentCount,
+  title,
+  acceptedCommentId = 0,
+  allowAcceptAnswer = false,
+  initialData,
+  onCreated,
+  ownerUserId,
+  restoreAnchorCommentId = 0,
+}: {
+  entityType: EntityType
+  entityId: EntityId
+  commentCount?: number
+  title?: string
+  acceptedCommentId?: number
+  allowAcceptAnswer?: boolean
+  initialData?: PageData<Comment>
+  onCreated?: (comment: Comment) => void
+  ownerUserId?: EntityId
+  restoreAnchorCommentId?: number
+}) {
+  const { t } = useI18n()
+  const pathname = usePathname()
+  const config = useAppConfig()
+  const currentUser = useCurrentUser()
+  const [pageData, setPageData] = React.useState<PageData<Comment>>(
+    initialData || { cursor: "", hasMore: true, results: [] }
+  )
+  const [loading, setLoading] = React.useState(false)
+  const [currentAcceptedCommentId, setCurrentAcceptedCommentId] =
+    React.useState(acceptedCommentId || 0)
+  const [onlyOwner, setOnlyOwner] = React.useState(false)
+  const [liveCommentCount, setLiveCommentCount] = React.useState(
+    Math.max(0, Number(commentCount || 0))
+  )
+  const pageDataRef = React.useRef(pageData)
+  const liveRefreshInFlightRef = React.useRef(false)
+  const restoreLoadAttemptsRef = React.useRef(0)
+  const restoreTargetRef = React.useRef(0)
+
+  React.useEffect(() => {
+    if (initialData) {
+      setPageData(initialData)
+    }
+  }, [initialData])
+
+  React.useEffect(() => {
+    setLiveCommentCount(Math.max(0, Number(commentCount || 0)))
+  }, [commentCount])
+
+  React.useEffect(() => {
+    pageDataRef.current = pageData
+  }, [pageData])
+
+  React.useEffect(() => {
+    const nextTarget = Math.max(0, Number(restoreAnchorCommentId || 0))
+    if (restoreTargetRef.current !== nextTarget) {
+      restoreTargetRef.current = nextTarget
+      restoreLoadAttemptsRef.current = 0
+    }
+  }, [restoreAnchorCommentId])
+
+  React.useEffect(() => {
+    const target = restoreTargetRef.current
+    if (
+      entityType !== "topic" ||
+      target <= 0 ||
+      onlyOwner ||
+      loading ||
+      !pageData.hasMore ||
+      pageData.results.some((item) => item.id === target) ||
+      restoreLoadAttemptsRef.current >= 30
+    ) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      if (restoreTargetRef.current !== target) return
+      restoreLoadAttemptsRef.current += 1
+      void loadMore()
+    }, 40)
+
+    return () => window.clearTimeout(timer)
+  }, [
+    entityType,
+    loading,
+    onlyOwner,
+    pageData.cursor,
+    pageData.hasMore,
+    pageData.results,
+    restoreAnchorCommentId,
+  ])
+
+  const refreshLiveComments = React.useCallback(async () => {
+    if (
+      (entityType !== "topic" && entityType !== "article") ||
+      liveRefreshInFlightRef.current ||
+      (typeof document !== "undefined" &&
+        document.visibilityState !== "visible")
+    ) {
+      return
+    }
+
+    liveRefreshInFlightRef.current = true
+    try {
+      const ret = await apiFetch<PageData<Comment>>("/api/comment/comments", {
+        params: {
+          entityType,
+          entityId,
+          cursor: "",
+          onlyOwner: onlyOwner ? 1 : 0,
+        },
+      })
+      const snapshot = pageDataRef.current
+      const knownIds = new Set((snapshot.results || []).map((item) => item.id))
+      const addedRootComments = (ret.results || []).reduce(
+        (count, item) => count + (knownIds.has(item.id) ? 0 : 1),
+        0
+      )
+
+      setPageData((current) => ({
+        ...current,
+        results: mergeLiveCommentPage(
+          current.results || [],
+          ret.results || []
+        ),
+      }))
+      if (addedRootComments > 0) {
+        setLiveCommentCount((current) => current + addedRootComments)
+      }
+    } catch {
+      // Realtime refresh is best-effort. Normal loading, posting and manual
+      // navigation must keep working even during a brief network interruption.
+    } finally {
+      liveRefreshInFlightRef.current = false
+    }
+  }, [entityId, entityType, onlyOwner])
+
+  React.useEffect(() => {
+    if (entityType !== "topic" && entityType !== "article") return
+
+    const timer = window.setInterval(
+      () => void refreshLiveComments(),
+      COMMENT_LIVE_REFRESH_INTERVAL_MS
+    )
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refreshLiveComments()
+      }
+    }
+    const refreshOnFocus = () => void refreshLiveComments()
+
+    document.addEventListener("visibilitychange", refreshWhenVisible)
+    window.addEventListener("focus", refreshOnFocus)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", refreshWhenVisible)
+      window.removeEventListener("focus", refreshOnFocus)
+    }
+  }, [entityType, refreshLiveComments])
+
+  async function switchOnlyOwner(next: boolean) {
+    if (loading || entityType !== "topic") return
+    setLoading(true)
+    try {
+      const ret = await apiFetch<PageData<Comment>>("/api/comment/comments", {
+        params: {
+          entityType,
+          entityId,
+          cursor: "",
+          onlyOwner: next ? 1 : 0,
+        },
+      })
+      setOnlyOwner(next)
+      setPageData(ret)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+
+  const isNeedEmailVerify =
+    Boolean(config?.createCommentEmailVerified) &&
+    Boolean(currentUser) &&
+    !currentUser?.emailVerified
+
+  async function loadMore() {
+    if (loading || !pageData.hasMore) {
+      return
+    }
+    setLoading(true)
+    try {
+      const ret = await apiFetch<PageData<Comment>>("/api/comment/comments", {
+        params: {
+          entityType,
+          entityId,
+          cursor: pageData.cursor || "",
+          onlyOwner: onlyOwner ? 1 : 0,
+        },
+      })
+      setPageData((current) => ({
+        cursor: ret.cursor,
+        hasMore: ret.hasMore,
+        results: mergeUniqueComments(current.results || [], ret.results || []),
+      }))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function onCommentCreated(comment: Comment) {
+    // "Only owner" is a server-side filter too. Do not inject a locally
+    // created non-owner comment into the filtered list until the filter is
+    // turned off, while still keeping the entity's total comment count fresh.
+    const belongsInCurrentFilter =
+      !onlyOwner ||
+      ownerUserId == null ||
+      String(comment.user.id) === String(ownerUserId)
+    if (belongsInCurrentFilter) {
+      setPageData((current) => {
+        const results = current.results || []
+        if (results.some((item) => item.id === comment.id)) return current
+        return { ...current, results: [comment, ...results] }
+      })
+    }
+    setLiveCommentCount((current) => current + 1)
+    onCreated?.(comment)
+  }
+
+  function updateComment(commentId: number, update: CommentUpdater) {
+    if (typeof update !== "function") {
+      if ((update as Comment & { accepted?: boolean }).accepted === true) {
+        setCurrentAcceptedCommentId(update.id)
+      } else if (
+        (update as Comment & { accepted?: boolean }).accepted === false
+      ) {
+        setCurrentAcceptedCommentId(0)
+      }
+    }
+
+    setPageData((current) => ({
+      ...current,
+      results: current.results.map((item) => {
+        if (item.id !== commentId) return item
+        const next = typeof update === "function" ? update(item) : update
+        return { ...next, accepted: undefined } as Comment
+      }),
+    }))
+  }
+
+  function deleteComment(comment: Comment) {
+    if (currentAcceptedCommentId === comment.id) {
+      setCurrentAcceptedCommentId(0)
+    }
+    setPageData((current) => ({
+      ...current,
+      results: current.results.filter((item) => item.id !== comment.id),
+    }))
+    setLiveCommentCount((current) => Math.max(0, current - 1))
+  }
+
+  return (
+    <section id="JComment" className="rounded-lg bg-background p-4">
+      <div className="flex items-center justify-between gap-3 text-base font-medium text-foreground">
+        <div>
+          <span>{title || t("component.comment.title")}</span>
+          {liveCommentCount > 0 ? (
+            <span>&nbsp;{liveCommentCount}</span>
+          ) : null}
+        </div>
+        {entityType === "topic" && ownerUserId != null ? (
+          <button
+            type="button"
+            className={cn(
+              "rounded-full px-3 py-1 text-xs transition-colors",
+              onlyOwner
+                ? "bg-primary/10 font-medium text-primary"
+                : "bg-muted text-muted-foreground hover:text-foreground"
+            )}
+            disabled={loading}
+            onClick={() => void switchOnlyOwner(!onlyOwner)}
+          >
+            {t("component.comment.onlyOwner")}
+          </button>
+        ) : null}
+      </div>
+
+      {currentUser ? (
+        isNeedEmailVerify ? (
+          <div className="relative my-2.5 box-border overflow-hidden rounded-[3px] border border-border p-2.5">
+            <div className="rounded-[3px] px-2.5 text-muted-foreground">
+              {t("component.comment.emailVerifyPrompt")}
+              <Link
+                href="/user/profile/account"
+                className="mx-2.5 text-foreground hover:text-primary"
+              >
+                {t("component.comment.accountSettingsLink")}
+              </Link>
+              {t("component.comment.emailVerifyAction")}
+            </div>
+          </div>
+        ) : (
+          <CommentInput
+            entityType={entityType}
+            entityId={entityId}
+            onCreated={onCommentCreated}
+          />
+        )
+      ) : (
+        <Link
+          href={buildSigninHref(pathname || "/")}
+          className="my-3 flex cursor-pointer items-center gap-2 rounded-lg border border-primary/40 bg-primary/[0.1] px-3 py-3 transition-colors hover:bg-primary/[0.15]"
+        >
+          <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+            <LogIn className="h-3.5 w-3.5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground">
+              {t("component.comment.loginLink")}
+            </p>
+          </div>
+        </Link>
+      )}
+
+      <div className="text-[15px]">
+        {pageData.results?.length ? (
+          pageData.results.map((comment) => (
+            <CommentItem
+              key={comment.id}
+              comment={comment}
+              acceptedCommentId={currentAcceptedCommentId}
+              allowAcceptAnswer={allowAcceptAnswer}
+              entityType={entityType}
+              entityId={entityId}
+              onChanged={(update) => updateComment(comment.id, update)}
+              onDeleted={deleteComment}
+            />
+          ))
+        ) : pageData.hasMore ? null : (
+          <EmptyState title={t("common.noData")} className="min-h-36" />
+        )}
+        <LoadMoreButton
+          loading={loading}
+          hasMore={pageData.hasMore}
+          labels={{
+            loadMore: t("common.loadMore.loadMore"),
+            noMore: t("common.loadMore.noMore"),
+          }}
+          onClick={() => void loadMore()}
+        />
+      </div>
+    </section>
+  )
+}
