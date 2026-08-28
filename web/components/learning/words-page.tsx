@@ -1,24 +1,20 @@
 "use client"
 
 import * as React from "react"
-import {
-  ArrowLeft,
-  ChevronRight,
-  Heart,
-  Mic,
-  Pencil,
-  Play,
-  Volume2,
-} from "lucide-react"
+import { ChevronDown, Heart, Play, Volume2 } from "lucide-react"
 
-import { HanziStrokeModal } from "@/components/learning/hanzi-stroke-modal"
-import { PronunciationRecorder } from "@/components/learning/pronunciation-recorder"
-import { readStorage, speakChinese, stopSpeech, writeStorage } from "@/lib/learning/browser"
+import {
+  lightHaptic,
+  readStorage,
+  speakChinese,
+  speakMyanmar,
+  stopSpeech,
+  writeStorage,
+} from "@/lib/learning/browser"
 import {
   dataAssetName,
   fetchLearningJson,
   flattenLeafNodes,
-  mediaAssetUrl,
   normalizeCatalog,
   normalizeWordPack,
   type LearningCatalog,
@@ -27,12 +23,9 @@ import {
 } from "@/lib/learning/content"
 
 const FAVORITES_KEY = "talkami.learning.words.favorites.v2"
-const SETTINGS_KEY = "talkami.learning.words.settings.v2"
 const POSITION_KEY = "talkami.learning.words.position.v2"
 
-type Settings = { showPinyin: boolean; showPhonetic: boolean; autoRead: boolean }
 type PositionMap = Record<string, { index: number; itemId?: string }>
-
 type TouchPoint = {
   x: number
   y: number
@@ -41,32 +34,14 @@ type TouchPoint = {
   clientHeight: number
 }
 
-const defaultSettings: Settings = { showPinyin: true, showPhonetic: true, autoRead: true }
-
-function compactPos(value: string) {
-  const raw = value.trim()
-  if (!raw) return ""
-  const key = raw.toLowerCase().replace(/[ _]/g, "")
-
-  if (["noun", "n", "n."].includes(key) || ["名词", "နာမ်"].includes(raw)) return "n."
-  if (["verb", "v", "v."].includes(key) || ["动词", "ကြိယာ"].includes(raw)) return "v."
-  if (["noun/verb", "n./v.", "n/v"].includes(key) || ["名词 / 动词", "名词/动词", "နာမ် / ကြိယာ", "နာမ်/ကြိယာ"].includes(raw)) return "n. / v."
-  if (["adjective", "adj", "adj."].includes(key) || ["形容词", "နာမဝိသေသန"].includes(raw)) return "adj."
-  if (["adverb", "adv", "adv."].includes(key) || ["副词", "ကြိယာဝိသေသန"].includes(raw)) return "adv."
-  if (["pronoun", "pron", "pron."].includes(key) || ["代词", "နာမ်စား"].includes(raw)) return "pron."
-  if (["preposition", "prep", "prep."].includes(key) || ["介词", "ဝိဘတ်"].includes(raw)) return "prep."
-  if (["conjunction", "conj", "conj."].includes(key) || ["连词", "ဆက်သွယ်စကား"].includes(raw)) return "conj."
-  if (["particle", "part", "part."].includes(key) || ["助词", "အမှုန်စကား"].includes(raw)) return "part."
-  if (["measure", "measureword", "mw", "mw."].includes(key) || ["量词", "ရေတွက်ပုဒ်"].includes(raw)) return "mw."
-  if (["numeral", "number", "num", "num."].includes(key) || ["数词", "ကိန်းဂဏန်း"].includes(raw)) return "num."
-  if (["auxiliary", "aux", "aux.", "modal"].includes(key) || ["助动词", "အကူကြိယာ"].includes(raw)) return "aux."
-  if (["interjection", "interj", "interj.", "greeting"].includes(key) || ["感叹词", "问候语", "နှုတ်ဆက်စကား", "ယဉ်ကျေးစကား"].includes(raw)) return "interj."
-  if (["phrase", "phr", "phr.", "expression", "expr", "expr."].includes(key) || ["短语", "固定表达", "စကားစု"].includes(raw)) return "phr."
-
-  // Match Android: do not leak Chinese/Burmese POS labels into the compact English slot.
-  if (/[\u3400-\u9fff\u1000-\u109f]/.test(raw)) return "word"
-  return raw
-}
+const STUDY_BACKGROUNDS = [
+  "#f1edff",
+  "#eaf5ff",
+  "#fff3df",
+  "#eaf8f1",
+  "#fff0f3",
+  "#eef0ff",
+] as const
 
 function groups(catalog: LearningCatalog) {
   return catalog.items.map((root) => ({
@@ -74,27 +49,6 @@ function groups(catalog: LearningCatalog) {
     subtitle: root.children.length ? root.subtitle : "",
     nodes: root.children.length ? flattenLeafNodes(root.children) : [root],
   }))
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  if (!children) return null
-  return (
-    <section className="mt-5">
-      <h4 className="text-[11px] font-black tracking-[0.1em] text-[#858c99]">{title}</h4>
-      <div className="mt-2 text-[15px] leading-7 text-[#333947]">{children}</div>
-    </section>
-  )
-}
-
-function highlighted(text: string, word: string) {
-  if (!word || !text.includes(word)) return text
-  const parts = text.split(word)
-  return parts.map((part, index) => (
-    <React.Fragment key={`${part}-${index}`}>
-      {part}
-      {index < parts.length - 1 ? <strong className="text-[#665ce7]">{word}</strong> : null}
-    </React.Fragment>
-  ))
 }
 
 export function WordsPage() {
@@ -106,24 +60,16 @@ export function WordsPage() {
   const [packId, setPackId] = React.useState("")
   const [items, setItems] = React.useState<WordItem[]>([])
   const [index, setIndex] = React.useState(0)
-  const [front, setFront] = React.useState(true)
   const [favorites, setFavorites] = React.useState<WordItem[]>([])
   const [positions, setPositions] = React.useState<PositionMap>({})
-  const [settings, setSettings] = React.useState<Settings>(defaultSettings)
-  const [recordingTarget, setRecordingTarget] = React.useState("")
-  const [strokeTarget, setStrokeTarget] = React.useState<WordItem | null>(null)
   const touchStart = React.useRef<TouchPoint | null>(null)
-  const studyScrollRef = React.useRef<HTMLDivElement | null>(null)
+  const studyScrollRef = React.useRef<HTMLElement | null>(null)
   const ignoreClick = React.useRef(false)
   const packAbort = React.useRef<AbortController | null>(null)
 
   React.useEffect(() => {
     setFavorites(readStorage<WordItem[]>(FAVORITES_KEY, []))
     setPositions(readStorage<PositionMap>(POSITION_KEY, {}))
-    setSettings({
-      ...defaultSettings,
-      ...readStorage<Partial<Settings>>(SETTINGS_KEY, {}),
-    })
   }, [])
 
   const loadCatalog = React.useCallback(async () => {
@@ -143,10 +89,13 @@ export function WordsPage() {
     void loadCatalog()
   }, [loadCatalog])
 
-  React.useEffect(() => () => {
-    stopSpeech()
-    packAbort.current?.abort()
-  }, [])
+  React.useEffect(
+    () => () => {
+      stopSpeech()
+      packAbort.current?.abort()
+    },
+    []
+  )
 
   const current = items[index] || null
   const currentKey = current ? `${current.packId}:${current.id}` : ""
@@ -158,9 +107,10 @@ export function WordsPage() {
     if (!current) return
     const previousOverflow = document.body.style.overflow
     const previousOverscrollBehavior = document.body.style.overscrollBehavior
-    const siteHeader = Array.from(document.querySelectorAll<HTMLElement>("header")).find(
-      (header) => !header.closest("[data-learning-fullscreen]")
-    ) || null
+    const siteHeader =
+      Array.from(document.querySelectorAll<HTMLElement>("header")).find(
+        (header) => !header.closest("[data-learning-fullscreen]")
+      ) || null
     const previousHeaderDisplay = siteHeader?.style.display || ""
 
     document.body.style.overflow = "hidden"
@@ -179,13 +129,7 @@ export function WordsPage() {
     if (!element) return
     element.scrollTop = 0
     element.scrollLeft = 0
-  }, [current?.id, current?.packId, front])
-
-  React.useEffect(() => {
-    if (!current || !front || !settings.autoRead) return
-    const timer = window.setTimeout(() => speakChinese(current.word, 0.94), 180)
-    return () => window.clearTimeout(timer)
-  }, [current?.id, current?.packId, current?.word, front, settings.autoRead])
+  }, [current?.id, current?.packId])
 
   React.useEffect(() => {
     if (!packId || !current) return
@@ -202,11 +146,13 @@ export function WordsPage() {
       setError(`“${node.title}”还没有可用的数据文件`)
       return
     }
+
     packAbort.current?.abort()
     const controller = new AbortController()
     packAbort.current = controller
     setPackLoading(true)
     setError("")
+
     try {
       const raw = await fetchLearningJson<unknown>(
         asset,
@@ -222,6 +168,7 @@ export function WordsPage() {
       if (node.itemCount > 0 && pack.items.length < node.itemCount) {
         throw new Error(`词包数据不完整：应有 ${node.itemCount} 词，实际 ${pack.items.length} 词`)
       }
+
       const stablePackId = node.id || pack.packId
       const stableItems = pack.items.map((item) => ({ ...item, packId: stablePackId }))
       const saved = positions[stablePackId]
@@ -232,11 +179,11 @@ export function WordsPage() {
       } else if (saved) {
         restoredIndex = Math.min(saved.index || 0, stableItems.length - 1)
       }
+
       setPackTitle(node.title || pack.title)
       setPackId(stablePackId)
       setItems(stableItems)
       setIndex(restoredIndex)
-      setFront(true)
     } catch (loadError) {
       if (controller.signal.aborted) return
       setError(loadError instanceof Error ? loadError.message : "单词数据加载失败")
@@ -250,14 +197,13 @@ export function WordsPage() {
 
   function openFavorites() {
     if (!favorites.length) {
-      setError("还没有收藏单词。进入任意词包后点击右上角星标即可收藏。")
+      setError("还没有收藏单词。进入任意词包后点击右上角收藏即可。")
       return
     }
     setPackTitle("收藏单词")
     setPackId("favorites")
     setItems(favorites)
     setIndex(0)
-    setFront(true)
     setError("")
   }
 
@@ -265,14 +211,8 @@ export function WordsPage() {
     stopSpeech()
     setItems([])
     setIndex(0)
-    setFront(true)
     setPackId("")
     setPackTitle("")
-  }
-
-  function saveSettings(next: Settings) {
-    setSettings(next)
-    writeStorage(SETTINGS_KEY, next)
   }
 
   function toggleFavorite() {
@@ -284,11 +224,12 @@ export function WordsPage() {
       : [...favorites, current]
     setFavorites(next)
     writeStorage(FAVORITES_KEY, next)
+    lightHaptic(8)
+
     if (exists && packId === "favorites") {
       const remaining = items.filter((item) => `${item.packId}:${item.id}` !== key)
       setItems(remaining)
       setIndex((value) => Math.max(0, Math.min(value, remaining.length - 1)))
-      setFront(true)
       if (!remaining.length) {
         setPackId("")
         setPackTitle("")
@@ -297,14 +238,22 @@ export function WordsPage() {
   }
 
   function move(delta: number) {
-    if (!items.length) return
+    if (!items.length) return false
     const next = Math.max(0, Math.min(items.length - 1, index + delta))
-    if (next === index) return
+    if (next === index) return false
     stopSpeech()
+    lightHaptic(12)
     setIndex(next)
-    setFront(true)
+    return true
   }
 
+  function runTap(action: () => void) {
+    if (ignoreClick.current) {
+      ignoreClick.current = false
+      return
+    }
+    action()
+  }
 
   function onTouchStart(event: React.TouchEvent<HTMLElement>) {
     const point = event.touches[0]
@@ -319,111 +268,127 @@ export function WordsPage() {
   }
 
   function onTouchEnd(event: React.TouchEvent<HTMLElement>) {
-    if (!current) return
     const start = touchStart.current
     touchStart.current = null
-    if (!start) return
+    if (!start || !current) return
+
     const point = event.changedTouches[0]
     const dx = point.clientX - start.x
     const dy = point.clientY - start.y
-    let handled = false
+    if (Math.abs(dy) <= 62 || Math.abs(dy) <= Math.abs(dx) * 1.15) return
 
-    if (Math.abs(dy) > 68 && Math.abs(dy) > Math.abs(dx) * 1.15) {
-      const scrollable = start.scrollHeight > start.clientHeight + 8
-      const atTop = start.scrollTop <= 8
-      const atBottom = start.scrollTop + start.clientHeight >= start.scrollHeight - 8
-      if (front || !scrollable || (dy > 0 && atTop) || (dy < 0 && atBottom)) {
-        handled = true
-        move(dy < 0 ? 1 : -1)
+    const scrollable = start.scrollHeight > start.clientHeight + 8
+    const atTop = start.scrollTop <= 8
+    const atBottom = start.scrollTop + start.clientHeight >= start.scrollHeight - 8
+    if (!scrollable || (dy > 0 && atTop) || (dy < 0 && atBottom)) {
+      if (move(dy < 0 ? 1 : -1)) {
+        ignoreClick.current = true
+        window.setTimeout(() => {
+          ignoreClick.current = false
+        }, 320)
       }
-    }
-
-    if (handled) {
-      ignoreClick.current = true
-      window.setTimeout(() => {
-        ignoreClick.current = false
-      }, 300)
     }
   }
 
   if (current) {
+    const backgroundColor = STUDY_BACKGROUNDS[index % STUDY_BACKGROUNDS.length]
+
     return (
-      <div data-learning-fullscreen className="fixed inset-0 z-[100] h-[100dvh] overflow-hidden bg-[#edf0f6] text-[#181d2a]">
-        <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-[max(6px,env(safe-area-inset-top))] sm:px-5">
-          <header className="flex h-12 shrink-0 items-center gap-2">
-            <button type="button" onClick={leavePack} className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#586171] shadow-sm" aria-label="返回"><ArrowLeft className="h-5 w-5" /></button>
-            <div className="min-w-0 flex-1 text-center">
-              <p className="truncate text-sm font-black">{packTitle}</p>
-              <p className="text-[10px] font-bold text-[#969ca8]">{Math.min(index + 1, items.length)}/{items.length}</p>
-            </div>
-            <button type="button" onClick={toggleFavorite} className={`flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-sm ${isFavorite ? "text-[#e9a116]" : "text-[#727a89]"}`} aria-label="收藏"><Heart className={`h-5 w-5 ${isFavorite ? "fill-current" : ""}`} /></button>
+      <div
+        data-learning-fullscreen
+        className="fixed inset-0 z-[100] h-[100dvh] overflow-hidden text-[#1f2230] transition-colors duration-300"
+        style={{ backgroundColor }}
+      >
+        <div className="mx-auto flex h-full w-full max-w-5xl flex-col">
+          <header className="flex shrink-0 items-center gap-3 border-b border-white/70 bg-white/45 px-4 pb-3 pt-[max(10px,env(safe-area-inset-top))] backdrop-blur-md sm:px-6">
+            <button
+              type="button"
+              onClick={leavePack}
+              className="min-w-0 rounded-full bg-white/80 px-3.5 py-2 text-left text-[13px] font-black text-[#5d55bf] shadow-sm active:scale-[.98]"
+            >
+              <span className="mr-1 text-[#89869a]">分类</span>
+              <span className="inline-block max-w-[170px] truncate align-bottom sm:max-w-[320px]">{packTitle}</span>
+            </button>
+            <p className="flex-1 text-center text-[11px] font-black text-[#737785]">{index + 1}/{items.length}</p>
+            <button
+              type="button"
+              onClick={toggleFavorite}
+              className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-black shadow-sm active:scale-[.98] ${isFavorite ? "bg-[#fff2cd] text-[#df9517]" : "bg-white/80 text-[#6f7280]"}`}
+              aria-label={isFavorite ? "取消收藏" : "收藏"}
+            >
+              <Heart className={`h-4 w-4 ${isFavorite ? "fill-current" : ""}`} />收藏
+            </button>
           </header>
 
-          <div className="flex items-center justify-center gap-2 py-2">
-            <button type="button" onClick={() => saveSettings({ ...settings, autoRead: !settings.autoRead })} className={`h-8 rounded-full px-3 text-[11px] font-black ${settings.autoRead ? "bg-[#ece9ff] text-[#655ce8]" : "bg-white text-[#818896]"}`}>自动朗读 {settings.autoRead ? "开" : "关"}</button>
-            <button type="button" onClick={() => saveSettings({ ...settings, showPinyin: !settings.showPinyin })} className={`h-8 rounded-full px-3 text-[11px] font-black ${settings.showPinyin ? "bg-[#edf5ff] text-[#3479c9]" : "bg-white text-[#818896]"}`}>拼音 {settings.showPinyin ? "开" : "关"}</button>
-            <button type="button" onClick={() => saveSettings({ ...settings, showPhonetic: !settings.showPhonetic })} className={`h-8 rounded-full px-3 text-[11px] font-black ${settings.showPhonetic ? "bg-[#fff1df] text-[#b97817]" : "bg-white text-[#818896]"}`}>谐音 {settings.showPhonetic ? "开" : "关"}</button>
-          </div>
-
-          <div
+          <main
             ref={studyScrollRef}
-            onClick={() => {
-              if (ignoreClick.current) { ignoreClick.current = false; return }
-              setFront((value) => !value)
-            }}
             onTouchStart={onTouchStart}
             onTouchEnd={onTouchEnd}
-            className={`relative mt-1 min-h-0 flex-1 rounded-[32px] border border-[#ded8ff] bg-[linear-gradient(155deg,#f0ecff_0%,#f8f6ff_50%,#edf4ff_100%)] text-left shadow-[0_20px_60px_rgba(53,60,91,.15)] ${front ? "touch-none overflow-hidden" : "touch-pan-y overflow-y-auto overscroll-contain"}`}
+            className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-[max(16px,env(safe-area-inset-bottom))] sm:px-6"
           >
-            {front ? (
-              <div className="flex h-full min-h-full flex-col items-center justify-center px-6 py-8 text-center">
-                <p className="absolute inset-x-0 top-6 text-center text-[11px] font-bold text-[#abb0bb]">上滑下一词 · 下滑上一词 · 点击翻面</p>
-                <h1 className="text-[58px] font-black leading-tight tracking-tight sm:text-[70px]">{current.word}</h1>
-                {settings.showPinyin && current.pinyin ? <p className="mt-3 text-[22px] font-semibold text-[#4b7fc8]">{current.pinyin}</p> : null}
-                {settings.showPhonetic && current.phoneticMy ? <p className="mt-2 text-lg font-black text-[#bb7818]">{current.phoneticMy}</p> : null}
-
-                <div className="absolute inset-x-0 bottom-7 flex justify-center gap-2">
-                  <button type="button" onClick={(event) => { event.stopPropagation(); speakChinese(current.word, 0.95) }} className="flex h-14 min-w-[60px] flex-col items-center justify-center rounded-2xl bg-[#efedff] px-2 text-[#655ce8]"><Volume2 className="h-4 w-4" /><span className="mt-1 text-[10px] font-black">朗读</span></button>
-                  <button type="button" onClick={(event) => { event.stopPropagation(); speakChinese(current.word, 0.58) }} className="flex h-14 min-w-[60px] flex-col items-center justify-center rounded-2xl bg-[#eef6ff] px-2 text-[#3478cb]"><Play className="h-4 w-4 fill-current" /><span className="mt-1 text-[10px] font-black">拼读</span></button>
-                  <button type="button" onClick={(event) => { event.stopPropagation(); setStrokeTarget(current) }} className="flex h-14 min-w-[60px] flex-col items-center justify-center rounded-2xl bg-[#fff4e7] px-2 text-[#b9791b]"><Pencil className="h-4 w-4" /><span className="mt-1 text-[10px] font-black">笔顺</span></button>
-                  <button type="button" onClick={(event) => { event.stopPropagation(); setRecordingTarget(current.word) }} className="flex h-14 min-w-[60px] flex-col items-center justify-center rounded-2xl bg-[#eaf8f1] px-2 text-[#278c6d]"><Mic className="h-4 w-4" /><span className="mt-1 text-[10px] font-black">跟读</span></button>
-                </div>
-              </div>
-            ) : (
-              <div className="min-h-full px-6 pb-8 pt-6 sm:px-8" onClick={(event) => { if ((event.target as HTMLElement).closest("button,a,audio")) event.stopPropagation() }}>
-                <div className="flex items-end justify-between gap-4 border-b border-[#eceef2] pb-4">
-                  <h2 className="text-[36px] font-black">{current.word}</h2>
-                  {settings.showPinyin && current.pinyin ? <p className="text-base font-semibold text-[#4b7fc8]">{current.pinyin}</p> : null}
-                </div>
-                {(current.partOfSpeech || current.meaningMy) ? (
-                  <div className="mt-5 flex items-start gap-3">
-                    {current.partOfSpeech ? <span className="mt-1 rounded-lg bg-[#f1f2f5] px-2 py-1 text-xs font-black text-[#747c8b]">{compactPos(current.partOfSpeech)}</span> : null}
-                    <p className="text-[23px] font-black leading-8 text-[#252a37]">{current.meaningMy}</p>
+            <div key={currentKey} className="mx-auto flex min-h-full w-full max-w-[760px] flex-col justify-center py-4 sm:py-6">
+              <section className="overflow-hidden rounded-[30px] border border-white/80 bg-white/60 shadow-[0_18px_55px_rgba(55,61,88,.10)] backdrop-blur-sm">
+                <button
+                  type="button"
+                  onClick={() => runTap(() => speakChinese(current.word, 0.94))}
+                  className="block w-full px-6 pb-5 pt-7 text-center active:bg-white/55 sm:px-10 sm:pb-6 sm:pt-9"
+                  aria-label={`朗读${current.word}`}
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <h1 className="text-[58px] font-black leading-tight tracking-tight sm:text-[72px]">{current.word}</h1>
+                    <Volume2 className="h-5 w-5 shrink-0 text-[#777a87]" />
                   </div>
+                  {current.pinyin ? <p className="mt-3 text-[21px] font-semibold text-[#4c78b5] sm:text-[23px]">{current.pinyin}</p> : null}
+                  {current.phoneticMy ? <p className="mt-2 text-[16px] font-black leading-7 text-[#c27043] sm:text-[17px]">{current.phoneticMy}</p> : null}
+                </button>
+
+                {current.meaningMy ? (
+                  <button
+                    type="button"
+                    onClick={() => runTap(() => speakMyanmar(current.meaningMy, 0.9))}
+                    className="flex w-full items-center justify-center gap-2 border-t border-white/80 bg-white/35 px-6 py-4 text-center text-[21px] font-black leading-8 text-[#247365] active:bg-white/65 sm:text-[23px]"
+                    aria-label="朗读缅语释义"
+                  >
+                    <span>{current.meaningMy}</span>
+                    <Volume2 className="h-4 w-4 shrink-0 opacity-70" />
+                  </button>
                 ) : null}
-                <Section title="使用场景">{current.usageSceneMy}</Section>
-                {current.example ? (
-                  <Section title="例句">
-                    <button type="button" onClick={() => speakChinese(current.example, 0.92)} className="mb-2 inline-flex h-8 items-center gap-1 rounded-full bg-[#eef4ff] px-3 text-xs font-black text-[#4a7ec9]"><Volume2 className="h-3.5 w-3.5" />朗读例句</button>
-                    <p className="text-lg font-semibold leading-8">{highlighted(current.example, current.word)}</p>
-                    {settings.showPinyin && current.examplePinyin ? <p className="mt-1 text-sm text-[#4d7fca]">{current.examplePinyin}</p> : null}
-                    {current.exampleMy ? <p className="mt-2 text-base text-[#687183]">{current.exampleMy}</p> : null}
-                  </Section>
-                ) : null}
-                <Section title="常用搭配">{current.collocations.join(" · ")}</Section>
-                <Section title="近义词">{current.synonyms.join(" · ")}</Section>
-                <Section title="反义词">{current.antonyms.join(" · ")}</Section>
-                <Section title="记忆提示">{current.memoryTip}</Section>
-                <Section title="注意">{current.notesMy}</Section>
-                <p className="mt-7 text-center text-xs text-[#a0a6b2]">点击空白区域返回正面</p>
-              </div>
-            )}
+              </section>
+
+              {current.example ? (
+                <section className="mt-4 rounded-[26px] border border-white/75 bg-white/48 px-5 py-4 shadow-[0_12px_36px_rgba(55,61,88,.07)] backdrop-blur-sm sm:px-6">
+                  <p className="mb-2 text-[11px] font-black tracking-[.12em] text-[#8a8d99]">例句</p>
+                  <button
+                    type="button"
+                    onClick={() => runTap(() => speakChinese(current.example, 0.92))}
+                    className="flex w-full items-start justify-between gap-3 text-left active:opacity-65"
+                  >
+                    <span className="text-[19px] font-black leading-8 text-[#242833] sm:text-[21px]">{current.example}</span>
+                    <Volume2 className="mt-1 h-4 w-4 shrink-0 text-[#747987]" />
+                  </button>
+                  {current.examplePinyin ? <p className="mt-1 text-[13px] font-semibold leading-6 text-[#557eaf]">{current.examplePinyin}</p> : null}
+                  {current.exampleMy ? (
+                    <button
+                      type="button"
+                      onClick={() => runTap(() => speakMyanmar(current.exampleMy, 0.88))}
+                      className="mt-2 flex w-full items-start justify-between gap-3 text-left text-[15px] font-semibold leading-7 text-[#35796d] active:opacity-65"
+                    >
+                      <span>{current.exampleMy}</span>
+                      <Volume2 className="mt-1 h-3.5 w-3.5 shrink-0 opacity-70" />
+                    </button>
+                  ) : null}
+                </section>
+              ) : null}
+
+              <p className="mt-4 text-center text-[10px] font-bold text-[#7f8290]/75">上滑下一词 · 下滑上一词 · 点中文或缅语朗读</p>
+            </div>
+          </main>
+
+          <div className="fixed right-3 top-1/2 z-10 hidden -translate-y-1/2 flex-col gap-2 lg:flex">
+            <button type="button" onClick={() => move(-1)} disabled={index === 0} className="flex h-10 w-10 rotate-180 items-center justify-center rounded-full border border-white/80 bg-white/80 shadow-sm disabled:opacity-25" aria-label="上一词"><ChevronDown className="h-5 w-5" /></button>
+            <button type="button" onClick={() => move(1)} disabled={index >= items.length - 1} className="flex h-10 w-10 items-center justify-center rounded-full border border-white/80 bg-white/80 shadow-sm disabled:opacity-25" aria-label="下一词"><ChevronDown className="h-5 w-5" /></button>
           </div>
-
         </div>
-
-        <HanziStrokeModal open={Boolean(strokeTarget)} word={strokeTarget?.word || ""} pinyin={strokeTarget?.pinyin || ""} onClose={() => setStrokeTarget(null)} />
-        <PronunciationRecorder open={Boolean(recordingTarget)} target={recordingTarget} onClose={() => setRecordingTarget("")} />
       </div>
     )
   }
@@ -435,14 +400,14 @@ export function WordsPage() {
           <div>
             <p className="text-[10px] font-black tracking-[0.22em] text-[#7469e7]">VOCABULARY</p>
             <h1 className="mt-1 text-[28px] font-black tracking-tight">单词</h1>
-            <p className="mt-1 max-w-xl text-sm leading-6 text-[#7c8494]">按 App 词包学习：拼音、缅语释义、例句、搭配、近反义词、笔顺和跟读。</p>
+            <p className="mt-1 max-w-xl text-sm leading-6 text-[#7c8494]">选择词包后全屏学习。一面显示汉字、拼音、谐音、缅语和高频例句。</p>
           </div>
           <button type="button" onClick={openFavorites} className="inline-flex h-10 shrink-0 items-center gap-2 rounded-full border border-[#e4e2f7] bg-white px-4 text-xs font-black text-[#6259da] shadow-sm"><Heart className="h-4 w-4" />收藏 {favorites.length || ""}</button>
         </div>
 
         {error ? <div className="mt-5 flex items-center justify-between gap-3 rounded-2xl border border-[#ffe0e5] bg-[#fff5f7] px-4 py-3 text-sm font-semibold text-[#b94d61]"><span>{error}</span><button type="button" onClick={() => void loadCatalog()} className="shrink-0 font-black text-[#655ce8]">重试</button></div> : null}
 
-        {catalogLoading ? <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-44 animate-pulse rounded-[24px] bg-white" />)}</div> : null}
+        {catalogLoading ? <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-28 animate-pulse rounded-[22px] bg-white" />)}</div> : null}
 
         {catalog ? (
           <div className="mt-7 space-y-8">
@@ -450,19 +415,13 @@ export function WordsPage() {
               <section key={`${group.title}-${groupIndex}`}>
                 {group.title ? <div className="mb-3"><h2 className="text-lg font-black">{group.title}</h2>{group.subtitle ? <p className="mt-1 text-xs text-[#8a91a0]">{group.subtitle}</p> : null}</div> : null}
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                  {group.nodes.map((node, nodeIndex) => {
-                    const cover = mediaAssetUrl(node.coverUrl, node.coverVersion)
-                    return (
-                      <button key={node.id} type="button" disabled={packLoading} onClick={() => void openPack(node)} className="group relative min-h-[172px] overflow-hidden rounded-[24px] border border-white/80 bg-white text-left shadow-[0_12px_30px_rgba(58,67,96,.1)] transition-transform active:scale-[.985] disabled:opacity-60">
-                        {cover ? <img src={cover} alt="" className="absolute inset-0 h-full w-full object-cover" /> : <div className={`absolute inset-0 ${nodeIndex % 3 === 0 ? "bg-[linear-gradient(145deg,#eeeaff,#faf9ff)]" : nodeIndex % 3 === 1 ? "bg-[linear-gradient(145deg,#e8f7f0,#f9fdfb)]" : "bg-[linear-gradient(145deg,#fff1e8,#fffaf6)]"}`} />}
-                        <div className="absolute inset-0 bg-gradient-to-b from-black/5 via-black/10 to-[#151b2a]/80" />
-                        <div className="relative flex h-full min-h-[172px] flex-col p-3 text-white">
-                          <div className="flex items-start justify-between gap-2"><span className="rounded-full bg-white/90 px-2 py-1 text-[9px] font-black text-[#4f5665]">{node.badge || (node.itemCount ? `${node.itemCount}词` : "词包")}</span><ChevronRight className="h-4 w-4" /></div>
-                          <div className="mt-auto"><h3 className="text-base font-black leading-5 drop-shadow-sm">{node.title}</h3><p className="mt-1 line-clamp-2 text-[11px] leading-4 text-white/80">{node.preview || node.subtitle || "进入开始学习"}</p></div>
-                        </div>
-                      </button>
-                    )
-                  })}
+                  {group.nodes.map((node) => (
+                    <button key={node.id} type="button" disabled={packLoading} onClick={() => void openPack(node)} className="min-h-[116px] rounded-[22px] border border-[#e8e9ef] bg-white p-4 text-left shadow-[0_10px_26px_rgba(55,63,91,.08)] transition-transform active:scale-[.985] disabled:opacity-60">
+                      <div className="flex items-start justify-between gap-2"><h3 className="line-clamp-2 text-[15px] font-black leading-5">{node.title}</h3><Play className="h-4 w-4 shrink-0 text-[#a0a6b1]" /></div>
+                      <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-[#838b99]">{node.subtitle || node.preview || "进入单词卡片"}</p>
+                      <p className="mt-3 text-[10px] font-bold text-[#6e55e8]">{node.itemCount ? `${node.itemCount} 词` : "单词"}</p>
+                    </button>
+                  ))}
                 </div>
               </section>
             ))}
