@@ -88,6 +88,11 @@ function signinHref(fullPath: string) {
   return `/user/signin?redirect=${encodeURIComponent(redirect)}`
 }
 
+function signupHref(fullPath: string) {
+  const redirect = fullPath.startsWith("/user/signup") ? "/" : fullPath
+  return `/user/signup?redirect=${encodeURIComponent(redirect)}`
+}
+
 function moduleItems(config: SiteConfig | null, t: TFunction) {
   const enabledModules = config?.modules
   const items: Array<{
@@ -375,7 +380,6 @@ function MobileMenu({
   onSignedOut: () => void
 }) {
   const router = useRouter()
-  const fullPath = useCurrentFullPath()
   const [open, setOpen] = React.useState(false)
   const [openIndexes, setOpenIndexes] = React.useState<number[]>([])
   const [pending, startTransition] = React.useTransition()
@@ -554,17 +558,7 @@ function MobileMenu({
                 {t("common.header.logout")}
               </Button>
             </div>
-          ) : (
-            <div className="px-3">
-              <SheetClose asChild onClick={closeMobileMenu}>
-                <Button className="w-full" asChild>
-                  <Link href={signinHref(fullPath)}>
-                    {t("common.header.login")}
-                  </Link>
-                </Button>
-              </SheetClose>
-            </div>
-          )}
+          ) : null}
 
           {showColorModeToggle ? (
             <>
@@ -629,25 +623,48 @@ export function SiteHeader() {
                 onSignedOut={() => setCurrentUser(null)}
               />
             ) : (
-              <Button variant="outline" className="h-8" asChild>
-                <Link href={signinHref(fullPath)}>
-                  {t("common.header.login")}
-                </Link>
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" className="h-8" asChild>
+                  <Link href={signinHref(fullPath)}>
+                    {t("common.header.login")}
+                  </Link>
+                </Button>
+                <Button className="h-8" asChild>
+                  <Link href={signupHref(fullPath)}>
+                    {t("user.signup.signupBtn")}
+                  </Link>
+                </Button>
+              </div>
             )}
             {showColorModeToggle ? (
               <ThemeToggle variant="ghost" size="icon-sm" />
             ) : null}
           </div>
 
-          <MobileMenu
-            navs={navs}
-            config={config}
-            user={user}
-            t={t}
-            showColorModeToggle={showColorModeToggle}
-            onSignedOut={() => setCurrentUser(null)}
-          />
+          <div className="flex items-center gap-1 md:hidden">
+            {!user ? (
+              <>
+                <Button variant="ghost" className="h-8 px-2 text-xs" asChild>
+                  <Link href={signinHref(fullPath)}>
+                    {t("common.header.login")}
+                  </Link>
+                </Button>
+                <Button className="h-8 px-2.5 text-xs" asChild>
+                  <Link href={signupHref(fullPath)}>
+                    {t("user.signup.signupBtn")}
+                  </Link>
+                </Button>
+              </>
+            ) : null}
+            <MobileMenu
+              navs={navs}
+              config={config}
+              user={user}
+              t={t}
+              showColorModeToggle={showColorModeToggle}
+              onSignedOut={() => setCurrentUser(null)}
+            />
+          </div>
         </div>
       </div>
     </header>
