@@ -368,6 +368,25 @@ export function speakChinese(text: string, rate = 1, onEnd?: () => void) {
   )
 }
 
+export function speakMyanmar(text: string, rate = 0.9, onEnd?: () => void) {
+  if (typeof window === "undefined") return false
+
+  const value = text.trim()
+  if (!value) return false
+  const generation = ++speechGeneration
+  stopActiveAudio()
+  stopSystemFallback()
+
+  return playRemoteTts(
+    value,
+    LEARNING_TTS_VOICES.myanmar,
+    "my-MM",
+    rate,
+    generation,
+    onEnd
+  )
+}
+
 /** Android phrase teaching audio reads Chinese first and then the Burmese gloss. */
 export function speakChineseThenMyanmar(
   chinese: string,

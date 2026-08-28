@@ -129,6 +129,7 @@ export type PhraseItem = {
   breakdown: PhraseBreakdown[]
   grammar: PhraseGrammar
   replacements: PhraseVariant[]
+  examples: PhraseVariant[]
   alternatives: PhraseVariant[]
   replies: PhraseVariant[]
   notes: LocalizedText[]
@@ -449,6 +450,7 @@ export function normalizePhrasePack(
         explanation: localized(grammarSource, "explanation"),
       },
       replacements: parseVariants(firstArray(source, item, "replacements")),
+      examples: parseVariants(firstArray(source, item, "examples")),
       alternatives: parseVariants(firstArray(source, item, "alternatives")),
       replies: parseVariants(firstArray(source, item, "replies")),
       notes: parseNotes(firstArray(source, item, "notes")),
