@@ -56,10 +56,29 @@ func newStorageDeleteService() *storageDeleteService {
 }
 
 func (s *storageDeleteService) EnqueueTargets(tx *gorm.DB, targets []storageDeleteTarget) error {
+	return s.enqueueTargetsAt(tx, targets, dates.NowTimestamp())
+}
+
+// EnqueueTargetsAfter is used for newly uploaded media that has not been attached
+// to a durable forum record yet. If the client disappears between upload and
+// comment creation, the delayed task reclaims the orphan. A successful comment
+// is protected by the normal surviving-reference check when the task becomes due.
+func (s *storageDeleteService) EnqueueTargetsAfter(tx *gorm.DB, targets []storageDeleteTarget, delay time.Duration) error {
+	if delay < 0 {
+		delay = 0
+	}
+	next := dates.NowTimestamp() + int64(delay/time.Millisecond)
+	return s.enqueueTargetsAt(tx, targets, next)
+}
+
+func (s *storageDeleteService) enqueueTargetsAt(tx *gorm.DB, targets []storageDeleteTarget, nextRetryTime int64) error {
 	if tx == nil || len(targets) == 0 {
 		return nil
 	}
 	now := dates.NowTimestamp()
+	if nextRetryTime < now {
+		nextRetryTime = now
+	}
 	seen := make(map[string]struct{}, len(targets))
 	rows := make([]models.StorageDeleteTask, 0, len(targets))
 	for _, target := range targets {
@@ -84,7 +103,7 @@ func (s *storageDeleteService) EnqueueTargets(tx *gorm.DB, targets []storageDele
 			Backend:       target.Backend,
 			ObjectKey:     target.ObjectKey,
 			AttemptCount:  0,
-			NextRetryTime: now,
+			NextRetryTime: nextRetryTime,
 			CreateTime:    now,
 			UpdateTime:    now,
 		})
@@ -92,7 +111,24 @@ func (s *storageDeleteService) EnqueueTargets(tx *gorm.DB, targets []storageDele
 	if len(rows) == 0 {
 		return nil
 	}
-	return tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(&rows, 100).Error
+	// A video upload pre-enqueues a delayed orphan-cleanup task. If the user
+	// deletes the comment before that grace period expires, the normal deletion
+	// enqueue must make the existing zero-attempt task due immediately instead
+	// of waiting for the orphan timer. Failed storage deletes (attempt_count > 0)
+	// keep their exponential backoff. The CASE expression is portable across the
+	// MySQL production DB and SQLite service tests.
+	onConflict := clause.OnConflict{
+		Columns: []clause.Column{{Name: "backend"}, {Name: "object_key"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"next_retry_time": gorm.Expr(
+				"CASE WHEN attempt_count = 0 AND next_retry_time > ? THEN ? ELSE next_retry_time END",
+				nextRetryTime, nextRetryTime),
+			"update_time": gorm.Expr(
+				"CASE WHEN attempt_count = 0 AND next_retry_time > ? THEN ? ELSE update_time END",
+				nextRetryTime, now),
+		}),
+	}
+	return tx.Clauses(onConflict).CreateInBatches(&rows, 100).Error
 }
 
 // ProcessPending immediately removes due objects and deletes successful outbox

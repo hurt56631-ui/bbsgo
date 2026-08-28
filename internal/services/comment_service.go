@@ -11,6 +11,8 @@ import (
 	"bbs-go/internal/pkg/locales"
 	"errors"
 	"log/slog"
+	"net/url"
+	"path"
 	"strings"
 
 	"bbs-go/internal/pkg/params"
@@ -394,6 +396,54 @@ func (s *commentService) DeleteByUser(user *models.User, id int64) error {
 	return s.Delete(id)
 }
 
+const (
+	maxCommentImageCount  = 3
+	maxCommentMediaURLLen = 4096
+)
+
+func validateCommentMedia(input []req.ImageDTO) ([]req.ImageDTO, error) {
+	if len(input) == 0 {
+		return nil, nil
+	}
+	cleaned := make([]req.ImageDTO, 0, len(input))
+	videoCount := 0
+	for _, item := range input {
+		raw := strings.TrimSpace(item.Url)
+		if raw == "" || len(raw) > maxCommentMediaURLLen {
+			return nil, errors.New(locales.Get("comment.invalid_params"))
+		}
+		if isCommentVideoMediaURL(raw) {
+			videoCount++
+			if !UploadService.IsOwnedVideoURL(raw) {
+				return nil, errors.New(locales.Get("comment.invalid_video_media"))
+			}
+		}
+		cleaned = append(cleaned, req.ImageDTO{Url: raw})
+	}
+	if videoCount > 0 {
+		if videoCount != 1 || len(cleaned) != 1 {
+			return nil, errors.New(locales.Get("comment.media_limit"))
+		}
+	} else if len(cleaned) > maxCommentImageCount {
+		return nil, errors.New(locales.Get("comment.media_limit"))
+	}
+	return cleaned, nil
+}
+
+func isCommentVideoMediaURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	ext := strings.ToLower(path.Ext(parsed.Path))
+	switch ext {
+	case ".mp4", ".m4v", ".webm", ".mov", ".3gp", ".mkv":
+		return true
+	default:
+		return false
+	}
+}
+
 // Publish 发表评论
 func (s *commentService) Publish(userId int64, form req.CreateCommentReq) (*models.Comment, error) {
 	form.Content = strings.TrimSpace(form.Content)
@@ -404,7 +454,11 @@ func (s *commentService) Publish(userId int64, form req.CreateCommentReq) (*mode
 	if entityId <= 0 {
 		return nil, errors.New(locales.Get("comment.invalid_params"))
 	}
-	if strs.IsBlank(form.Content) {
+	imageList, mediaErr := validateCommentMedia(form.ParsedImageList())
+	if mediaErr != nil {
+		return nil, mediaErr
+	}
+	if strs.IsBlank(form.Content) && len(imageList) == 0 {
 		return nil, errors.New(locales.Get("comment.content_required"))
 	}
 
@@ -422,7 +476,6 @@ func (s *commentService) Publish(userId int64, form req.CreateCommentReq) (*mode
 		CreateTime:  dates.NowTimestamp(),
 	}
 
-	imageList := form.ParsedImageList()
 	if len(imageList) > 0 {
 		imageListStr, err := jsons.ToStr(imageList)
 		if err == nil {

@@ -8,9 +8,11 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mlogclub/simple/common/strs"
 	"github.com/mlogclub/simple/common/urls"
+	"github.com/mlogclub/simple/sqls"
 
 	"bbs-go/internal/models/dto"
 	"bbs-go/internal/pkg/bbsurls"
@@ -21,6 +23,7 @@ import (
 const (
 	forumImageUploadMaxBytes int64 = 10 * 1024 * 1024
 	forumVoiceUploadMaxBytes int64 = 5 * 1024 * 1024
+	forumVideoUploadMaxBytes int64 = 10 * 1024 * 1024
 )
 
 var UploadService = newUploadService()
@@ -107,6 +110,60 @@ func (s *uploadService) PutVoiceStream(body io.Reader, contentLength int64, cont
 	return s.putObject(key, body, opts)
 }
 
+// PutVideoStream stores an already client-compressed forum comment video.
+// The API accepts only validated MP4 and keeps video objects under their own
+// namespace so the existing durable delete queue can clean them independently.
+func (s *uploadService) PutVideoStream(body io.Reader, contentLength int64, contentType string) (string, error) {
+	if contentLength <= 0 {
+		return "", fmt.Errorf("video content length is required")
+	}
+	if contentLength > forumVideoUploadMaxBytes {
+		return "", fmt.Errorf("video exceeds 10 MB upload limit")
+	}
+	key := uploader.GenerateVideoKeyByContentType(contentType)
+	opts := &uploader.PutOptions{ContentType: contentType, ContentLength: contentLength}
+	videoURL, err := s.putObject(key, body, opts)
+	if err != nil {
+		return "", err
+	}
+
+	// Upload and comment creation are two HTTP requests. Pre-enqueue a delayed
+	// cleanup task so a process death/network failure between them cannot leak a
+	// video forever. When the task becomes due, StorageDeleteService checks live
+	// topic/comment references first; a successfully attached video is retained.
+	cfg := SysConfigService.GetUploadConfig()
+	method := cfg.EnableUploadMethod
+	if strs.IsBlank(string(method)) {
+		method = dto.Local
+	}
+	target := storageDeleteTarget{Backend: string(method), ObjectKey: key}
+	if err := StorageDeleteService.EnqueueTargetsAfter(sqls.DB(), []storageDeleteTarget{target}, 10*time.Minute); err != nil {
+		// If durability cannot be established, roll the just-written object back.
+		// Returning an error lets the client retry without silently consuming disk.
+		if deleteErr := s.DeleteObject(method, key); deleteErr != nil {
+			return "", fmt.Errorf("queue video cleanup: %v; rollback delete: %w", err, deleteErr)
+		}
+		return "", fmt.Errorf("queue video cleanup: %w", err)
+	}
+	return videoURL, nil
+}
+
+// IsOwnedVideoURL accepts only MP4 objects managed by this forum's configured
+// Local/OSS/COS/S3 storage. External direct-video URLs must not be smuggled into
+// comment imageList, where clients treat them as trusted native video media.
+func (s *uploadService) IsOwnedVideoURL(raw string) bool {
+	_, key, ok := s.ResolveOwnedObject(raw)
+	if !ok {
+		return false
+	}
+	key = strings.Trim(strings.TrimSpace(strings.ReplaceAll(key, "\\", "/")), "/")
+	lower := strings.ToLower(key)
+	if !(strings.HasPrefix(lower, "video/") || strings.HasPrefix(lower, "test/video/")) {
+		return false
+	}
+	return strings.EqualFold(path.Ext(lower), ".mp4")
+}
+
 func (s *uploadService) CopyImage(url string) (string, error) {
 	u, err := s.getUploader()
 	if err != nil {
@@ -183,7 +240,7 @@ func hasParentPathSegment(value string) bool {
 func isForumManagedObjectKey(key string) bool {
 	key = strings.Trim(strings.TrimSpace(strings.ReplaceAll(key, "\\", "/")), "/")
 	return strings.HasPrefix(key, "images/") || strings.HasPrefix(key, "attachments/") || strings.HasPrefix(key, "voice/") ||
-		strings.HasPrefix(key, "test/images/") || strings.HasPrefix(key, "test/attachments/") || strings.HasPrefix(key, "test/voice/")
+		strings.HasPrefix(key, "video/") || strings.HasPrefix(key, "test/images/") || strings.HasPrefix(key, "test/attachments/") || strings.HasPrefix(key, "test/voice/") || strings.HasPrefix(key, "test/video/")
 }
 
 func uploadBackendRecognizable(cfg dto.UploadConfig, method dto.UploadMethod) bool {
