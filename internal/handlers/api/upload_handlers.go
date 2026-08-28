@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"image"
 	_ "image/gif"
@@ -36,6 +37,8 @@ const (
 	mimeSniffBytes             = 512
 	voiceUploadMaxMB           = 5
 	voiceUploadMaxBytes        = voiceUploadMaxMB * 1024 * 1024
+	videoUploadMaxMB           = 10
+	videoUploadMaxBytes        = videoUploadMaxMB * 1024 * 1024
 	defaultTangSengVoiceAPIURL = "https://api.886.best"
 )
 
@@ -105,6 +108,58 @@ func UploadHandle(ctx *gin.Context) {
 		"size":        header.Size,
 		"width":       width,
 		"height":      height,
+	})
+}
+
+func UploadVideoHandle(ctx *gin.Context) {
+	user := common.GetCurrentUser(ctx)
+	if err := services.UserService.CheckPostStatus(user); err != nil {
+		ginx.WriteJSON(ctx, err)
+		return
+	}
+
+	ctx.Request.Body = http.MaxBytesReader(
+		ctx.Writer,
+		ctx.Request.Body,
+		videoUploadMaxBytes+multipartOverhead,
+	)
+
+	file, header, err := ctx.Request.FormFile("video")
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			ginx.WriteJSON(ctx, ginx.ErrorMessage(locales.Getf("upload.video_too_large", videoUploadMaxMB)))
+			return
+		}
+		ginx.WriteJSON(ctx, err)
+		return
+	}
+	defer file.Close()
+
+	if header.Size <= 0 || header.Size > videoUploadMaxBytes {
+		ginx.WriteJSON(ctx, ginx.ErrorMessage(locales.Getf("upload.video_too_large", videoUploadMaxMB)))
+		return
+	}
+	if err := validateUploadedMP4Stream(file); err != nil {
+		ginx.WriteJSON(ctx, ginx.ErrorMessage(err.Error()))
+		return
+	}
+
+	const contentType = "video/mp4"
+	slog.Info("upload forum video",
+		slog.String("filename", header.Filename),
+		slog.Int64("size", header.Size),
+	)
+
+	videoURL, err := services.UploadService.PutVideoStream(file, header.Size, contentType)
+	if err != nil {
+		ginx.WriteJSON(ctx, err)
+		return
+	}
+	ginx.WriteJSON(ctx, map[string]any{
+		"url":         videoURL,
+		"contentType": contentType,
+		"size":        header.Size,
 	})
 }
 
@@ -428,6 +483,67 @@ func tangSengVoicePreviewURL(base, objectPath string) (string, error) {
 	u.RawQuery = ""
 	u.Fragment = ""
 	return u.String(), nil
+}
+
+func validateUploadedMP4Stream(file io.ReadSeeker) error {
+	if file == nil {
+		return errors.New(locales.Get("upload.empty_video"))
+	}
+	size, err := file.Seek(0, io.SeekEnd)
+	if err != nil || size < 24 {
+		return errors.New(locales.Get("upload.invalid_video_data"))
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return errors.New(locales.Get("upload.invalid_video_data"))
+	}
+
+	var hasFtyp, hasMoov, hasMdat bool
+	var pos int64
+	header := make([]byte, 16)
+	for boxes := 0; pos+8 <= size && boxes < 10000; boxes++ {
+		if _, err := file.Seek(pos, io.SeekStart); err != nil {
+			return errors.New(locales.Get("upload.invalid_video_data"))
+		}
+		if _, err := io.ReadFull(file, header[:8]); err != nil {
+			return errors.New(locales.Get("upload.invalid_video_data"))
+		}
+		boxSize := int64(binary.BigEndian.Uint32(header[:4]))
+		boxType := string(header[4:8])
+		headerSize := int64(8)
+		if boxSize == 1 {
+			if _, err := io.ReadFull(file, header[8:16]); err != nil {
+				return errors.New(locales.Get("upload.invalid_video_data"))
+			}
+			large := binary.BigEndian.Uint64(header[8:16])
+			if large > uint64(^uint64(0)>>1) {
+				return errors.New(locales.Get("upload.invalid_video_data"))
+			}
+			boxSize = int64(large)
+			headerSize = 16
+		} else if boxSize == 0 {
+			boxSize = size - pos
+		}
+		if boxSize < headerSize || boxSize > size-pos {
+			return errors.New(locales.Get("upload.invalid_video_data"))
+		}
+		switch boxType {
+		case "ftyp":
+			hasFtyp = true
+		case "moov":
+			hasMoov = true
+		case "mdat":
+			hasMdat = true
+		}
+		pos += boxSize
+	}
+	if pos != size || !hasFtyp || !hasMoov || !hasMdat {
+		_, _ = file.Seek(0, io.SeekStart)
+		return errors.New(locales.Get("upload.unsupported_video_format"))
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return errors.New(locales.Get("upload.invalid_video_data"))
+	}
+	return nil
 }
 
 func validateUploadedVoiceStream(file io.ReadSeeker) (string, error) {
