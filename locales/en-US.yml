@@ -149,6 +149,8 @@ vote:
 
 comment:
   invalid_params: "Invalid request parameters"
+  media_limit: "A comment can contain up to 3 images or 1 video; images and video cannot be mixed"
+  invalid_video_media: "Invalid video. Please select the video again"
   content_required: "Comment content is required"
   not_found: "Comment not found"
 
@@ -197,6 +199,10 @@ upload:
   invalid_image_dimensions: "Invalid image dimensions"
   image_dimensions_too_large: "Image dimensions are too large"
   image_format_mismatch: "Image format does not match its content"
+  video_too_large: "Video cannot exceed %d MB"
+  empty_video: "Video file is empty"
+  invalid_video_data: "Invalid video data"
+  unsupported_video_format: "Only MP4 video is supported"
   voice_too_large: "Voice message cannot exceed %d MB"
   empty_voice: "Voice file is empty"
   invalid_voice_data: "Invalid voice data"
