@@ -41,6 +41,7 @@ import { userHasPermission } from "@/lib/auth/roles"
 import { createAdminInitialFilters } from "@/lib/dashboard/default-filters"
 import { useI18n } from "@/lib/i18n/provider"
 import { msgSuccess } from "@/lib/toast"
+import { invalidatePersistedTopicLists } from "@/lib/topic-list-persistence"
 import { cn } from "@/lib/utils"
 import { PERMISSIONS } from "@/lib/auth/permissions.generated"
 
@@ -251,6 +252,9 @@ export default function DashboardTopicsRoute() {
         await adminDelete(endpoints[action], { id })
       } else {
         await adminPostForm(endpoints[action], { id })
+      }
+      if (action === "delete") {
+        invalidatePersistedTopicLists()
       }
       msgSuccess(topicActionSuccessMessage(t, action))
       await load()
