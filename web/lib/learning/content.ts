@@ -1,3 +1,5 @@
+import { generateChinesePinyin } from "@/lib/learning/chinese-pinyin"
+
 export const LEARNING_CONTENT_BASE = "/learning-content"
 
 export type LearningCatalogNode = {
@@ -36,6 +38,7 @@ export type WordExample = {
 export type WordItem = {
   packId: string
   audioPackId: string
+  audioVersion: number
   id: string
   word: string
   pinyin: string
@@ -286,20 +289,26 @@ export function normalizeWordPack(
         ? `hsk${level}`
         : packId
     const memoryTip = record(item.memory_tip)
-    const pinyin = first(item.pinyin_override, item.pinyin)
+    const pinyin =
+      first(item.pinyin_override, item.pinyin) || generateChinesePinyin(word)
     const legacyExamples = array(item.examples)
       .map((rawExample) => {
         const example = record(rawExample)
+        const exampleText = first(example.text, example.hanzi)
         return {
-          text: first(example.text, example.hanzi),
-          pinyin: first(example.pinyin_override, example.pinyin),
+          text: exampleText,
+          pinyin:
+            first(example.pinyin_override, example.pinyin) ||
+            generateChinesePinyin(exampleText),
           meaningMy: first(example.meaning_my, example.burmese),
         }
       })
       .filter((example) => example.text)
 
     const richExampleText = text(item.example)
-    const richExamplePinyin = first(item.example_pinyin_override, item.example_pinyin)
+    const richExamplePinyin =
+      first(item.example_pinyin_override, item.example_pinyin) ||
+      generateChinesePinyin(richExampleText)
     const richExampleMy = first(item.example_my, exampleTranslations.my)
     const examples = legacyExamples.length
       ? legacyExamples
@@ -311,6 +320,7 @@ export function normalizeWordPack(
     items.push({
       packId,
       audioPackId,
+      audioVersion: numberValue(item.audio_version),
       id: identifier(item.id) || `${packId}_${index + 1}`,
       word,
       pinyin,
@@ -369,9 +379,11 @@ function parseVariants(value: unknown): PhraseVariant[] {
         }
       }
       const item = record(raw)
-      const pinyin = first(item.pinyin_override, item.pinyin)
+      const variantText = text(item.text)
+      const pinyin =
+        first(item.pinyin_override, item.pinyin) || generateChinesePinyin(variantText)
       return {
-        text: text(item.text),
+        text: variantText,
         pinyin,
         ttsPinyin: first(item.tts_pinyin_override, item.tts_pinyin, pinyin),
         meaningMy: text(item.meaning_my),
@@ -403,9 +415,12 @@ function parseBreakdown(value: unknown): PhraseBreakdown[] {
   return array(value)
     .map((raw) => {
       const item = record(raw)
+      const breakdownText = text(item.text)
       return {
-        text: text(item.text),
-        pinyin: first(item.pinyin_override, item.pinyin),
+        text: breakdownText,
+        pinyin:
+          first(item.pinyin_override, item.pinyin) ||
+          generateChinesePinyin(breakdownText),
         partOfSpeech: text(item.pos),
         partOfSpeechMy: text(item.pos_my),
         partOfSpeechEn: text(item.pos_en),
@@ -430,10 +445,12 @@ function parseDialogue(value: unknown): PhraseDialogueLine[] {
   return array(value)
     .map((raw) => {
       const item = record(raw)
-      const pinyin = first(item.pinyin_override, item.pinyin)
+      const dialogueText = text(item.text)
+      const pinyin =
+        first(item.pinyin_override, item.pinyin) || generateChinesePinyin(dialogueText)
       return {
         speaker: text(item.speaker),
-        text: text(item.text),
+        text: dialogueText,
         pinyin,
         ttsPinyin: first(item.tts_pinyin_override, item.tts_pinyin, pinyin),
         meaningMy: text(item.meaning_my),
@@ -459,7 +476,9 @@ export function normalizePhrasePack(
     if (!phraseText) continue
     const analysis = record(item.analysis)
     const source = Object.keys(analysis).length ? analysis : item
-    const pinyin = first(source.pinyin_override, item.pinyin_override, source.pinyin, item.pinyin)
+    const pinyin =
+      first(source.pinyin_override, item.pinyin_override, source.pinyin, item.pinyin) ||
+      generateChinesePinyin(phraseText)
     const grammarSource = record(source.grammar)
 
     phrases.push({

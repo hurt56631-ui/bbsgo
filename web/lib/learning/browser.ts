@@ -35,11 +35,19 @@ function safeWordAudioPart(value: string | number) {
 }
 
 /** Same-origin proxy URL. Upstream storage is audio/<pack>/<id>.mp3. */
-export function wordAudioUrl(packId: string, itemId: string | number) {
+export function wordAudioUrl(
+  packId: string,
+  itemId: string | number,
+  version = 0
+) {
   const pack = safeWordAudioPart(packId).toLowerCase()
   const id = safeWordAudioPart(itemId)
   if (!pack || !id) return ""
-  return `/learning-word-audio?pack=${encodeURIComponent(pack)}&id=${encodeURIComponent(id)}`
+  const params = new URLSearchParams({ pack, id })
+  if (Number.isFinite(version) && version > 0) {
+    params.set("v", String(Math.floor(version)))
+  }
+  return `/learning-word-audio?${params.toString()}`
 }
 
 async function cachedWordAudioResponse(url: string) {
@@ -69,9 +77,15 @@ async function cachedWordAudioResponse(url: string) {
  * still remove site data if the user clears it, but persistent storage greatly
  * reduces automatic eviction on supported browsers.
  */
-export async function cacheWordAudioPack(packId: string, itemIds: Array<string | number>) {
+export async function cacheWordAudioPack(
+  packId: string,
+  itemIds: Array<string | number>,
+  version = 0
+) {
   if (typeof window === "undefined" || !("caches" in window)) return false
-  const urls = Array.from(new Set(itemIds.map((id) => wordAudioUrl(packId, id)).filter(Boolean)))
+  const urls = Array.from(
+    new Set(itemIds.map((id) => wordAudioUrl(packId, id, version)).filter(Boolean))
+  )
   if (!urls.length) return false
 
   try {
@@ -79,6 +93,25 @@ export async function cacheWordAudioPack(packId: string, itemIds: Array<string |
       await navigator.storage.persist().catch(() => false)
     }
     const cache = await window.caches.open(WORD_AUDIO_CACHE)
+    // Remove obsolete cached revisions of this pack when data_version changes.
+    const normalizedPack = safeWordAudioPart(packId).toLowerCase()
+    const normalizedVersion = Number.isFinite(version) && version > 0
+      ? String(Math.floor(version))
+      : ""
+    const cachedRequests = await cache.keys()
+    await Promise.all(
+      cachedRequests.map(async (request) => {
+        try {
+          const cachedUrl = new URL(request.url)
+          if (cachedUrl.pathname !== "/learning-word-audio") return
+          if ((cachedUrl.searchParams.get("pack") || "").toLowerCase() !== normalizedPack) return
+          if ((cachedUrl.searchParams.get("v") || "") === normalizedVersion) return
+          await cache.delete(request)
+        } catch {
+          // Ignore malformed/foreign cache keys.
+        }
+      })
+    )
     // Keep concurrency modest so opening HSK1 does not create 150 simultaneous requests.
     let cursor = 0
     const workers = Array.from({ length: Math.min(4, urls.length) }, async () => {
@@ -107,11 +140,12 @@ export function speakWordAudio(
   packId: string,
   itemId: string | number,
   fallbackText: string,
+  version = 0,
   rate = 1,
   onEnd?: () => void
 ) {
   if (typeof window === "undefined") return false
-  const url = wordAudioUrl(packId, itemId)
+  const url = wordAudioUrl(packId, itemId, version)
   const fallback = fallbackText.trim()
   if (!url) return fallback ? speakChinese(fallback, rate, onEnd) : false
 
