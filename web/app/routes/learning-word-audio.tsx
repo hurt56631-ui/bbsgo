@@ -1,5 +1,5 @@
 const AUDIO_RAW_BASE =
-  "https://github.com/hurt56631-ui/talkami-learning-content/raw/refs/heads/main/audio/"
+  "https://raw.githubusercontent.com/hurt56631-ui/talkami-learning-content/main/audio/"
 
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024
 
