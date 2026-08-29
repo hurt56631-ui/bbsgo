@@ -169,7 +169,11 @@ export function WordsPage() {
       }
 
       const stablePackId = node.id || pack.packId
-      const stableItems = pack.items.map((item) => ({ ...item, packId: stablePackId }))
+      const stableItems = pack.items.map((item) => ({
+        ...item,
+        packId: stablePackId,
+        audioVersion: node.dataVersion,
+      }))
       const saved = positions[stablePackId]
       let restoredIndex = 0
       if (saved?.itemId) {
@@ -186,7 +190,11 @@ export function WordsPage() {
       // Fixed Chinese word recordings live at audio/<pack>/<id>.mp3.
       // Cache the whole opened pack in the background for near-instant repeat study.
       const audioPackId = stableItems[0]?.audioPackId || stablePackId
-      void cacheWordAudioPack(audioPackId, stableItems.map((item) => item.id))
+      void cacheWordAudioPack(
+        audioPackId,
+        stableItems.map((item) => item.id),
+        node.dataVersion
+      )
     } catch (loadError) {
       if (controller.signal.aborted) return
       setError(loadError instanceof Error ? loadError.message : "单词数据加载失败")
@@ -351,15 +359,23 @@ export function WordsPage() {
             className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 sm:px-5 sm:pb-5 sm:pt-5"
           >
             <div className="relative mx-auto min-h-full w-full max-w-[760px]">
-              <div className="pointer-events-none absolute inset-x-2 inset-y-1 rounded-[31px] border border-white/12 bg-[#244737] shadow-[0_18px_46px_rgba(0,0,0,.18)]" />
-
               <section
                 key={currentKey}
                 className={`relative z-[1] flex min-h-[calc(100dvh-96px)] w-full flex-col overflow-hidden rounded-[30px] border border-[#e8e7df] bg-white shadow-[0_20px_58px_rgba(0,0,0,.24)] transition-[transform,opacity] duration-150 ease-out sm:min-h-[calc(100dvh-112px)] ${cardMotion}`}
               >
                 <button
                   type="button"
-                  onClick={() => runTap(() => speakWordAudio(current.audioPackId || current.packId, current.id, current.word, 0.96))}
+                  onClick={() =>
+                    runTap(() =>
+                      speakWordAudio(
+                        current.audioPackId || current.packId,
+                        current.id,
+                        current.word,
+                        current.audioVersion,
+                        0.96
+                      )
+                    )
+                  }
                   className="block w-full shrink-0 px-6 pb-5 pt-8 text-center active:bg-[#f7f7f2] sm:px-10 sm:pb-6 sm:pt-10"
                   aria-label={`播放${current.word}固定音频`}
                 >
