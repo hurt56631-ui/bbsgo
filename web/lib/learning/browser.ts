@@ -735,6 +735,136 @@ export function speakMyanmar(text: string, rate = 0.9, onEnd?: () => void) {
   )
 }
 
+type MultilingualSpeechLanguage = "zh-CN" | "my-MM" | "en-US"
+
+function speechLanguageForCharacter(character: string): MultilingualSpeechLanguage | null {
+  const code = character.codePointAt(0)
+  if (code === undefined) return null
+
+  // Myanmar + Myanmar Extended-A/B.
+  if (
+    (code >= 0x1000 && code <= 0x109f) ||
+    (code >= 0xaa60 && code <= 0xaa7f) ||
+    (code >= 0xa9e0 && code <= 0xa9ff)
+  ) {
+    return "my-MM"
+  }
+
+  // CJK Unified Ideographs, Extension A and Compatibility Ideographs.
+  if (
+    (code >= 0x3400 && code <= 0x4dbf) ||
+    (code >= 0x4e00 && code <= 0x9fff) ||
+    (code >= 0xf900 && code <= 0xfaff)
+  ) {
+    return "zh-CN"
+  }
+
+  // Latin text (including pinyin with tone marks) uses Ava as an English /
+  // multilingual voice. Digits, punctuation and spaces stay attached to the
+  // surrounding spoken segment.
+  if (
+    (code >= 0x0041 && code <= 0x005a) ||
+    (code >= 0x0061 && code <= 0x007a) ||
+    (code >= 0x00c0 && code <= 0x024f)
+  ) {
+    return "en-US"
+  }
+
+  return null
+}
+
+function splitMultilingualSpeech(text: string) {
+  const segments: Array<{ language: MultilingualSpeechLanguage; text: string }> = []
+  let currentLanguage: MultilingualSpeechLanguage | null = null
+  let currentText = ""
+  let prefix = ""
+
+  for (const character of text) {
+    const language = speechLanguageForCharacter(character)
+    if (!language) {
+      if (currentLanguage) currentText += character
+      else prefix += character
+      continue
+    }
+
+    if (!currentLanguage) {
+      currentLanguage = language
+      currentText = prefix + character
+      prefix = ""
+      continue
+    }
+
+    if (language === currentLanguage) {
+      currentText += character
+      continue
+    }
+
+    if (currentText.trim()) {
+      segments.push({ language: currentLanguage, text: currentText })
+    }
+    currentLanguage = language
+    currentText = character
+  }
+
+  if (currentLanguage && currentText.trim()) {
+    segments.push({ language: currentLanguage, text: currentText + prefix })
+  } else if (!segments.length && text.trim()) {
+    // Unknown-script text still gets a useful multilingual Ava fallback.
+    segments.push({ language: "en-US", text })
+  }
+
+  return segments
+}
+
+/**
+ * Read interactive-course text with the correct voice for Chinese, Burmese and
+ * Latin/pinyin runs. CoursePlayer historically imports this public helper, so
+ * keep it as a stable compatibility API alongside the word-learning helpers.
+ */
+export function speakMultilingual(text: string, rate = 0.94, onEnd?: () => void) {
+  if (typeof window === "undefined") return false
+
+  const value = text.trim()
+  if (!value) return false
+  const segments = splitMultilingualSpeech(value)
+  if (!segments.length) return false
+
+  // Cancel any pending word-card Chinese -> Burmese handoff before a course
+  // narration starts, then keep one generation across every language segment.
+  speechSequenceGeneration += 1
+  const generation = ++speechGeneration
+  stopActiveAudio()
+  stopSystemFallback()
+
+  const playSegment = (index: number): boolean => {
+    if (generation !== speechGeneration) return false
+    const segment = segments[index]
+    if (!segment) {
+      onEnd?.()
+      return true
+    }
+
+    const isMyanmar = segment.language === "my-MM"
+    const started = playRemoteTts(
+      segment.text,
+      isMyanmar ? LEARNING_TTS_VOICES.myanmar : LEARNING_TTS_VOICES.chinese,
+      segment.language,
+      isMyanmar ? Math.min(rate, 0.9) : rate,
+      generation,
+      () => {
+        if (generation === speechGeneration) playSegment(index + 1)
+      }
+    )
+
+    if (!started && generation === speechGeneration) {
+      return playSegment(index + 1)
+    }
+    return started
+  }
+
+  return playSegment(0)
+}
+
 /** Android phrase teaching audio reads Chinese first and then the Burmese gloss. */
 export function speakChineseThenMyanmar(
   chinese: string,
