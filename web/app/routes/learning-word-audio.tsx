@@ -3,6 +3,12 @@ const AUDIO_RAW_BASE =
 
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024
 
+function normalizedAudioFileId(id: string) {
+  if (!/^\d+$/.test(id)) return id
+  const compact = id.replace(/^0+(?=\d)/, "")
+  return compact.padStart(4, "0")
+}
+
 async function readLimitedBytes(response: Response, limit: number) {
   const reader = response.body?.getReader()
   if (!reader) {
@@ -46,7 +52,10 @@ export async function loader({ request }: { request: Request }) {
     return new Response("Invalid word audio", { status: 400 })
   }
 
-  const upstreamUrl = `${AUDIO_RAW_BASE}${encodeURIComponent(pack)}/${encodeURIComponent(id)}.mp3`
+  // Published HSK recordings use four-digit filenames (0033.mp3, ...).
+  // Normalize here as well as in the browser so older cached clients keep working.
+  const fileId = normalizedAudioFileId(id)
+  const upstreamUrl = `${AUDIO_RAW_BASE}${encodeURIComponent(pack)}/${encodeURIComponent(fileId)}.mp3`
   try {
     const upstream = await fetch(upstreamUrl, {
       redirect: "follow",
