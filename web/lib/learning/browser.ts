@@ -27,11 +27,37 @@ export function lightHaptic(duration = 12) {
   }
 }
 
-
-const WORD_AUDIO_CACHE = "talkami-word-audio-v1"
+// Fixed recordings currently published in talkami-learning-content.
+// Keep this map in sync when more packs/ranges are uploaded. Items outside
+// these ranges should go straight to LibreTTS so a missing MP3 never delays
+// pronunciation after the user's tap.
+const FIXED_WORD_AUDIO_RANGES: Record<
+  string,
+  ReadonlyArray<readonly [number, number]>
+> = {
+  hsk1: [[33, 150]],
+}
 
 function safeWordAudioPart(value: string | number) {
   return String(value).trim().replace(/[^A-Za-z0-9_-]/g, "")
+}
+
+function normalizedWordAudioId(value: string | number) {
+  const id = safeWordAudioPart(value)
+  if (!/^\d+$/.test(id)) return id
+  const compact = id.replace(/^0+(?=\d)/, "")
+  return compact.padStart(4, "0")
+}
+
+function hasFixedWordAudio(packId: string, itemId: string | number) {
+  const pack = safeWordAudioPart(packId).toLowerCase()
+  const id = safeWordAudioPart(itemId)
+  if (!/^\d+$/.test(id)) return false
+  const numericId = Number(id)
+  if (!Number.isSafeInteger(numericId)) return false
+  return (FIXED_WORD_AUDIO_RANGES[pack] || []).some(
+    ([start, end]) => numericId >= start && numericId <= end
+  )
 }
 
 /** Same-origin proxy URL. Upstream storage is audio/<pack>/<id>.mp3. */
@@ -41,7 +67,7 @@ export function wordAudioUrl(
   version = 0
 ) {
   const pack = safeWordAudioPart(packId).toLowerCase()
-  const id = safeWordAudioPart(itemId)
+  const id = normalizedWordAudioId(itemId)
   if (!pack || !id) return ""
   const params = new URLSearchParams({ pack, id })
   if (Number.isFinite(version) && version > 0) {
@@ -50,79 +76,33 @@ export function wordAudioUrl(
   return `/learning-word-audio?${params.toString()}`
 }
 
-async function cachedWordAudioResponse(url: string) {
-  if (typeof window === "undefined") return null
-
-  if (!("caches" in window)) {
-    const response = await fetch(url)
-    return response.ok ? response : null
-  }
-
-  const cache = await window.caches.open(WORD_AUDIO_CACHE)
-  const cached = await cache.match(url)
-  if (cached) return cached
-
-  const response = await fetch(url)
-  if (!response.ok) return null
-  try {
-    await cache.put(url, response.clone())
-  } catch {
-    // Storage quota/private mode can reject cache writes; playback still works.
-  }
-  return response
-}
-
-/**
- * Download one word pack's fixed Chinese MP3s into CacheStorage. Browsers may
- * still remove site data if the user clears it, but persistent storage greatly
- * reduces automatic eviction on supported browsers.
- */
+/** Warm the browser's HTTP media cache for the fixed MP3s in an opened pack. */
 export async function cacheWordAudioPack(
   packId: string,
   itemIds: Array<string | number>,
   version = 0
 ) {
-  if (typeof window === "undefined" || !("caches" in window)) return false
+  if (typeof window === "undefined") return false
   const urls = Array.from(
-    new Set(itemIds.map((id) => wordAudioUrl(packId, id, version)).filter(Boolean))
+    new Set(
+      itemIds
+        .filter((id) => hasFixedWordAudio(packId, id))
+        .map((id) => wordAudioUrl(packId, id, version))
+        .filter(Boolean)
+    )
   )
   if (!urls.length) return false
 
   try {
-    if (navigator.storage?.persist) {
-      await navigator.storage.persist().catch(() => false)
-    }
-    const cache = await window.caches.open(WORD_AUDIO_CACHE)
-    // Remove obsolete cached revisions of this pack when data_version changes.
-    const normalizedPack = safeWordAudioPart(packId).toLowerCase()
-    const normalizedVersion = Number.isFinite(version) && version > 0
-      ? String(Math.floor(version))
-      : ""
-    const cachedRequests = await cache.keys()
-    await Promise.all(
-      cachedRequests.map(async (request) => {
-        try {
-          const cachedUrl = new URL(request.url)
-          if (cachedUrl.pathname !== "/learning-word-audio") return
-          if ((cachedUrl.searchParams.get("pack") || "").toLowerCase() !== normalizedPack) return
-          if ((cachedUrl.searchParams.get("v") || "") === normalizedVersion) return
-          await cache.delete(request)
-        } catch {
-          // Ignore malformed/foreign cache keys.
-        }
-      })
-    )
-    // Keep concurrency modest so opening HSK1 does not create 150 simultaneous requests.
+    // Keep concurrency modest so opening HSK1 does not create 118 simultaneous requests.
     let cursor = 0
     const workers = Array.from({ length: Math.min(4, urls.length) }, async () => {
       while (cursor < urls.length) {
         const index = cursor++
         const url = urls[index]
         try {
-          const existing = await cache.match(url)
-          if (existing) continue
-          const response = await fetch(url)
-          if (response.ok) await cache.put(url, response.clone())
+          const response = await fetch(url, { cache: "force-cache" })
+          if (response.ok) await response.arrayBuffer()
         } catch {
           // Missing/failed files are retried naturally on a later pack open or tap.
         }
@@ -135,7 +115,7 @@ export async function cacheWordAudioPack(
   }
 }
 
-/** Play fixed Chinese word audio first; fall back to Xiaoxiao TTS if the MP3 is missing. */
+/** Play fixed Chinese word audio when published; otherwise use LibreTTS immediately. */
 export function speakWordAudio(
   packId: string,
   itemId: string | number,
@@ -147,58 +127,57 @@ export function speakWordAudio(
   if (typeof window === "undefined") return false
   const url = wordAudioUrl(packId, itemId, version)
   const fallback = fallbackText.trim()
+  if (!hasFixedWordAudio(packId, itemId)) {
+    return fallback ? speakChinese(fallback, rate, onEnd) : false
+  }
   if (!url) return fallback ? speakChinese(fallback, rate, onEnd) : false
 
   const generation = ++speechGeneration
   stopActiveAudio()
   stopSystemFallback()
 
-  void (async () => {
-    try {
-      const response = await cachedWordAudioResponse(url)
-      if (!response || generation !== speechGeneration) {
-        if (!response && generation === speechGeneration && fallback) {
-          speakChinese(fallback, rate, onEnd)
-        }
-        return
-      }
+  // Start the media element directly inside the tap handler. Fetching the MP3
+  // into a Blob first can lose transient user activation on mobile Safari and
+  // Android WebView, causing both the recording and the later TTS fallback to
+  // be rejected as autoplay.
+  const audio = new Audio()
+  activeAudio = audio
+  audio.preload = "auto"
+  audio.src = url
+  audio.playbackRate = clamp(rate, 0.5, 1.5)
 
-      const blob = await response.blob()
-      if (generation !== speechGeneration) return
-      const objectUrl = URL.createObjectURL(blob)
-      const audio = new Audio()
-      activeAudio = audio
-      let cleaned = false
-      const cleanupUrl = () => {
-        if (cleaned) return
-        cleaned = true
-        URL.revokeObjectURL(objectUrl)
-      }
-      activeAudioAbort = cleanupUrl
-      audio.preload = "auto"
-      audio.src = objectUrl
-      audio.playbackRate = clamp(rate, 0.5, 1.5)
-      audio.onended = () => {
-        cleanupUrl()
-        if (activeAudio === audio) activeAudio = null
-        if (activeAudioAbort === cleanupUrl) activeAudioAbort = null
-        if (generation === speechGeneration) onEnd?.()
-      }
-      audio.onerror = () => {
-        cleanupUrl()
-        if (activeAudio === audio) activeAudio = null
-        if (activeAudioAbort === cleanupUrl) activeAudioAbort = null
-        if (generation === speechGeneration && fallback) speakChinese(fallback, rate, onEnd)
-      }
-      try {
-        await audio.play()
-      } catch {
-        audio.onerror?.(new Event("error"))
-      }
-    } catch {
-      if (generation === speechGeneration && fallback) speakChinese(fallback, rate, onEnd)
+  let settled = false
+  const clearActive = () => {
+    if (activeAudio === audio) activeAudio = null
+  }
+  const finish = () => {
+    if (settled) return
+    settled = true
+    clearActive()
+    if (generation === speechGeneration) onEnd?.()
+  }
+  const fallbackToTts = () => {
+    if (settled) return
+    settled = true
+    clearActive()
+    if (generation !== speechGeneration) return
+    if (fallback) {
+      speakChinese(fallback, rate, onEnd)
+    } else {
+      onEnd?.()
     }
-  })()
+  }
+
+  audio.onended = finish
+  audio.onerror = fallbackToTts
+  try {
+    const playResult = audio.play()
+    if (playResult && typeof playResult.catch === "function") {
+      void playResult.catch(fallbackToTts)
+    }
+  } catch {
+    fallbackToTts()
+  }
   return true
 }
 
@@ -218,7 +197,7 @@ export const LEARNING_TTS_BACKUP_ENDPOINT =
 
 /** Microsoft neural speakers used by the learning pages. */
 export const LEARNING_TTS_VOICES = {
-  chinese: "zh-CN-XiaoxiaoMultilingualNeural",
+  chinese: "en-US-AvaMultilingualNeural",
   myanmar: "my-MM-NilarNeural",
 } as const
 
