@@ -33,7 +33,7 @@ export const LEARNING_TTS_BACKUP_ENDPOINT =
 
 /** Microsoft neural speakers used by the learning pages. */
 export const LEARNING_TTS_VOICES = {
-  chinese: "zh-CN-XiaoxiaoMultilingualNeural",
+  chinese: "en-US-AvaMultilingualNeural",
   myanmar: "my-MM-NilarNeural",
 } as const
 
