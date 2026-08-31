@@ -3,6 +3,7 @@
 import Link from "@/components/common/link"
 import { useI18n } from "@/lib/i18n/provider"
 import {
+  BookOpenCheck,
   BookOpenIcon,
   ChevronRight,
   LanguagesIcon,
@@ -66,6 +67,7 @@ type LearningCopy = {
     (typeof studyCards)[number]["key"],
     { title: string; description: string }
   >
+  course: { title: string; description: string; action: string }
   community: string
   all: string
 }
@@ -86,6 +88,11 @@ const learningCopy: Record<LearningLocale, LearningCopy> = {
       words: { title: "单词", description: "拼音 · 例句 · 笔顺 · 跟读" },
       phrases: { title: "实用短句", description: "场景 · 拆解 · 表达 · 跟读" },
     },
+    course: {
+      title: "互动课",
+      description: "PPT式自动排版 · 点击朗读 · 本页讲稿 · 课后练习",
+      action: "开始上课",
+    },
     community: "学习交流",
     all: "全部",
   },
@@ -104,6 +111,11 @@ const learningCopy: Record<LearningLocale, LearningCopy> = {
       words: { title: "Words", description: "Pinyin · Examples · Strokes · Shadowing" },
       phrases: { title: "Useful phrases", description: "Scenes · Breakdown · Usage · Shadowing" },
     },
+    course: {
+      title: "Interactive lessons",
+      description: "PPT-style layout · tap to hear · page narration · final practice",
+      action: "Start lesson",
+    },
     community: "Learning community",
     all: "View all",
   },
@@ -121,6 +133,11 @@ const learningCopy: Record<LearningLocale, LearningCopy> = {
     cards: {
       words: { title: "စကားလုံး", description: "ပင်းယင်း · ဥပမာ · ရေးစဉ် · လိုက်ဖတ်" },
       phrases: { title: "အသုံးဝင် စကားစုများ", description: "အခြေအနေ · ခွဲခြမ်း · အသုံး · လိုက်ဖတ်" },
+    },
+    course: {
+      title: "အပြန်အလှန် သင်ခန်းစာ",
+      description: "PPT ပုံစံ · နှိပ်ပြီးအသံနားထောင် · စာမျက်နှာရှင်းလင်းချက် · နောက်ဆုံးလေ့ကျင့်ခန်း",
+      action: "စလေ့လာမည်",
     },
     community: "လေ့လာရေး ဆွေးနွေးချက်",
     all: "အားလုံး",
@@ -202,6 +219,26 @@ export function LearningHome() {
               )
             })}
           </div>
+
+          <Link
+            href="/courses"
+            className="mt-5 block overflow-hidden rounded-[24px] border border-[#ddd7ff] bg-[linear-gradient(135deg,#eee9ff_0%,#f7f4ff_48%,#e7f7f0_100%)] p-4 shadow-[0_12px_34px_rgba(86,73,168,0.14)] transition-transform active:scale-[0.99] sm:p-5"
+          >
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[17px] bg-white/80 text-[#6658d8] shadow-sm">
+                <BookOpenCheck className="h-6 w-6" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-[20px] font-black leading-tight text-[#182033]">{copy.course.title}</h3>
+                <p className="mt-1 text-[11px] font-semibold leading-5 text-[#667082] sm:text-xs">{copy.course.description}</p>
+              </div>
+              <div className="hidden shrink-0 items-center gap-1 rounded-full bg-white/85 px-3 py-2 text-xs font-black text-[#6658d8] sm:inline-flex">
+                {copy.course.action}
+                <ChevronRight className="h-4 w-4" />
+              </div>
+              <ChevronRight className="h-5 w-5 shrink-0 text-[#7a70d7] sm:hidden" />
+            </div>
+          </Link>
 
           <div className="mt-5 grid grid-cols-2 gap-3">
             {studyCards.map((item) => {
