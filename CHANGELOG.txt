@@ -1,0 +1,27 @@
+网页单词音频 / LibreTTS Ava 修复
+
+改动文件：
+1. web/lib/learning/browser.ts
+   - 中文 LibreTTS 发音人改为 en-US-AvaMultilingualNeural。
+   - 当前固定 MP3 范围明确为 HSK1 33-150。
+   - 33-150 的数字 ID 统一补成四位文件名，例如 33 -> 0033。
+   - HSK1 1-32、HSK2、HSK3 等当前没有固定 MP3 的词，点击时直接调用 LibreTTS，不再先等待不存在的 MP3。
+   - 固定 MP3 改为在点击事件内直接 audio.play()，避免 fetch -> Blob 后丢失移动端用户手势导致播放被拦截。
+   - 打开词包时只预取当前真实存在的 118 个固定 MP3，不再对缺失音频批量请求。
+
+2. web/app/routes/learning-word-audio.tsx
+   - 服务端音频代理也兼容数字 ID 补零：33 -> 0033.mp3。
+   - 继续使用新账号 hurt56631-ui/talkami-learning-content。
+
+3. web/lib/browser.ts
+   - 同步把重复的中文 TTS 发音人配置改成 en-US-AvaMultilingualNeural，避免以后旧模块被重新引用时声音不一致。
+
+没有修改：
+- 短句 TTS 的调用逻辑；仍然使用现有 LibreTTS 流程。
+- 缅语发音人 my-MM-NilarNeural。
+- GitHub 账号地址；网页相关地址本来已经是 hurt56631-ui。
+
+验证：
+- 对 3 个改动 TypeScript 文件运行了独立 tsc 语法/类型检查，通过。
+- 上传的 audio/hsk1 目录检查为 0033.mp3 到 0150.mp3，共 118 个，区间内无缺号。
+- 上传项目没有 node_modules，环境没有 pnpm，因此没有运行完整项目 pnpm typecheck/build。
